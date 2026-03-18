@@ -2,13 +2,14 @@ import * as pulumi from "@pulumi/pulumi";
 import * as azurenative from "@pulumi/azure-native";
 
 export interface ClusterConfig {
-    resourceGroupName: string;
+    resourceGroupName: pulumi.Input<string>;
     environment: string;
     kubernetesVersion: string;
     systemPoolVmSize: string;
     systemPoolMinCount: number;
     systemPoolMaxCount: number;
     sshPubKey: string;
+    adminUserObjectId?: string;
 }
 
 export function createAksCluster(config: ClusterConfig) {
@@ -17,7 +18,9 @@ export function createAksCluster(config: ClusterConfig) {
     // Create AKS Automatic cluster with Standard tier
     const managedCluster = new azurenative.containerservice.ManagedCluster(clusterName, {
         resourceGroupName: config.resourceGroupName,
-        location: pulumi.output(azurenative.resources.getResourceGroup({ resourceGroupName: config.resourceGroupName })).location,
+        location: pulumi.output(config.resourceGroupName).apply(rgName =>
+            azurenative.resources.getResourceGroup({ resourceGroupName: rgName })
+        ).apply(rg => rg.location),
 
         // AKS Automatic requires Standard tier
         sku: {
@@ -32,6 +35,7 @@ export function createAksCluster(config: ClusterConfig) {
         dnsPrefix: `${config.environment}-aks`,
 
         // System node pool (required even in Automatic mode)
+        // Note: enableAutoScaling must be false when using NAP (Node Auto-Provisioning)
         agentPoolProfiles: [{
             name: "system",
             mode: "System",
@@ -39,13 +43,9 @@ export function createAksCluster(config: ClusterConfig) {
             osType: "Linux",
             osSKU: "AzureLinux",
             count: config.systemPoolMinCount,
-            minCount: config.systemPoolMinCount,
-            maxCount: config.systemPoolMaxCount,
-            enableAutoScaling: true,
+            enableAutoScaling: false,
             type: "VirtualMachineScaleSets",
             enableNodePublicIP: false,
-            // ARM64 nodes
-            kubeletDiskType: "OS",
         }],
 
         // Azure CNI Overlay with Cilium (preconfigured in Automatic)
@@ -54,19 +54,17 @@ export function createAksCluster(config: ClusterConfig) {
             networkPluginMode: "overlay",
             networkDataplane: "cilium",
             loadBalancerSku: "standard",
+            outboundType: "managedNATGateway",
             serviceCidr: "10.0.0.0/16",
             dnsServiceIP: "10.0.0.10",
         },
 
-        // Node Auto-Provisioning (NAP) - automatically creates nodes based on workload demands
-        nodeProvisioningProfile: {
-            mode: "Auto",
-        },
+        // Note: Node Auto-Provisioning (NAP) is automatically enabled in AKS Automatic mode
+        // No explicit configuration needed - it's part of the Automatic SKU
 
         // Auto-upgrade configuration
         autoUpgradeProfile: {
             upgradeChannel: "stable",
-            nodeOSUpgradeChannel: "NodeImage",
         },
 
         // OIDC issuer for workload identity
@@ -116,25 +114,28 @@ export function createAksCluster(config: ClusterConfig) {
         },
     });
 
-    // Get admin credentials for cluster access
-    const adminCredentials = pulumi.all([config.resourceGroupName, managedCluster.name]).apply(
+    // Get user credentials for cluster access (admin credentials disabled in Automatic mode)
+    const userCredentials = pulumi.all([config.resourceGroupName, managedCluster.name]).apply(
         ([rgName, clusterName]) =>
-            azurenative.containerservice.listManagedClusterAdminCredentials({
+            azurenative.containerservice.listManagedClusterUserCredentials({
                 resourceGroupName: rgName,
                 resourceName: clusterName,
             })
     );
 
     // Decode kubeconfig from base64
-    const kubeconfig = adminCredentials.kubeconfigs[0].value.apply(enc =>
+    const kubeconfig = userCredentials.kubeconfigs[0].value.apply(enc =>
         Buffer.from(enc, "base64").toString()
     );
+
+    // Note: RBAC role assignment should be done manually or via separate deployment
+    // az role assignment create --assignee <user-id> --role "Azure Kubernetes Service RBAC Cluster Admin" --scope <cluster-id>
 
     return {
         cluster: managedCluster,
         kubeconfig: kubeconfig,
         clusterName: managedCluster.name,
-        oidcIssuerUrl: managedCluster.oidcIssuerProfile.apply(profile => profile?.issuerUrl || ""),
+        oidcIssuerUrl: managedCluster.oidcIssuerProfile.apply(profile => profile?.issuerURL || ""),
         fqdn: managedCluster.fqdn,
     };
 }

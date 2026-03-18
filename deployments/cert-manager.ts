@@ -8,16 +8,31 @@ export interface CertManagerConfig {
 }
 
 export function installCertManager(config: CertManagerConfig) {
-    // Install cert-manager via Helm
-    const certManager = new k8s.helm.v3.Chart(
+    // Create cert-manager namespace first
+    const certManagerNamespace = new k8s.core.v1.Namespace(
+        `cert-manager-ns-${config.environment}`,
+        {
+            metadata: {
+                name: "cert-manager",
+                labels: {
+                    "app.kubernetes.io/managed-by": "pulumi",
+                    environment: config.environment,
+                }
+            }
+        },
+        { provider: config.provider }
+    );
+
+    // Install cert-manager using Helm Release (not Chart - Release waits for deployment)
+    const certManager = new k8s.helm.v3.Release(
         `cert-manager-${config.environment}`,
         {
             chart: "cert-manager",
             version: "v1.16.2",
-            namespace: "cert-manager",
-            fetchOpts: {
+            repositoryOpts: {
                 repo: "https://charts.jetstack.io",
             },
+            namespace: certManagerNamespace.metadata.name,
             values: {
                 installCRDs: true,
                 global: {
@@ -25,9 +40,45 @@ export function installCertManager(config: CertManagerConfig) {
                         namespace: "cert-manager",
                     },
                 },
+                // Add resource requests for AKS Automatic Gatekeeper policies
+                resources: {
+                    requests: {
+                        cpu: "10m",
+                        memory: "32Mi",
+                    },
+                },
+                webhook: {
+                    timeoutSeconds: 30,
+                    resources: {
+                        requests: {
+                            cpu: "10m",
+                            memory: "32Mi",
+                        },
+                    },
+                },
+                cainjector: {
+                    resources: {
+                        requests: {
+                            cpu: "10m",
+                            memory: "32Mi",
+                        },
+                    },
+                },
+                startupapicheck: {
+                    resources: {
+                        requests: {
+                            cpu: "10m",
+                            memory: "32Mi",
+                        },
+                    },
+                },
             },
+            skipAwait: false, // Wait for deployment to be ready before proceeding
         },
-        { provider: config.provider }
+        {
+            provider: config.provider,
+            dependsOn: [certManagerNamespace]
+        }
     );
 
     // Create Let's Encrypt ClusterIssuer (production)
@@ -60,7 +111,7 @@ export function installCertManager(config: CertManagerConfig) {
         },
         {
             provider: config.provider,
-            dependsOn: certManager,
+            dependsOn: [certManager],
         }
     );
 
@@ -94,12 +145,13 @@ export function installCertManager(config: CertManagerConfig) {
         },
         {
             provider: config.provider,
-            dependsOn: certManager,
+            dependsOn: [certManager],
         }
     );
 
     return {
-        chart: certManager,
+        release: certManager,
+        namespace: certManagerNamespace,
         clusterIssuerProd,
         clusterIssuerStaging,
     };

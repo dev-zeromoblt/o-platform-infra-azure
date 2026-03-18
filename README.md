@@ -5,7 +5,8 @@ Production-ready Pulumi TypeScript project deploying 3 AKS Automatic clusters (d
 ## Architecture Overview
 
 - **AKS Automatic Mode**: All clusters use AKS Automatic SKU with Standard tier
-- **ARM64 Cost Optimization**: Dpsv5/Epsv5 series (~20% cheaper than x86_64)
+- **ARM64 Cost Optimization**: Dpdsv5 series with ephemeral OS support (~20% cheaper than x86_64)
+  - Note: Use Dpdsv5 (with 'd'), NOT Dpsv5 (without 'd'). Only Dpdsv5 supports ephemeral OS disks required by AKS Automatic.
 - **Node Auto-Provisioning (NAP)**: Automatic node creation based on workload demands
 - **Managed Networking**: Azure CNI Overlay + Cilium pre-configured
 - **Managed Ingress**: NGINX ingress controller included

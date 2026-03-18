@@ -2,9 +2,11 @@ config:
   azure-native:location: centralindia
   o-platform-infra-azure:environment: prod
   o-platform-infra-azure:kubernetesVersion: "1.32"
-  o-platform-infra-azure:systemPoolVmSize: Standard_D8ps_v5
+  o-platform-infra-azure:systemPoolVmSize: Standard_D8pds_v5
   o-platform-infra-azure:systemPoolMinCount: "3"
   o-platform-infra-azure:systemPoolMaxCount: "10"
   o-platform-infra-azure:domain: az.zeromoblt.com
   o-platform-infra-azure:certManagerEmail: admin@zeromoblt.com
   # Set SSH public key with: pulumi config set sshPubKey "$(cat ~/.ssh/id_rsa.pub)"
+
+  o-platform-infra-azure:sshPubKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCyBIXOWGhZrLEd3ytTn6LAi0FkLTgLDFG0cpLjrk99FiykX9xTDzOoRJB1J7s8w3WH4HSAqhyd5l27wYUIeQycG7jVim9g3IDWjRtGX53C0I0vM2PXyRzPPjsW8zAQQumoikx8xQ6A3+uqC0fVqih0sbD6lrZqVZexZX/UtQarbhOayoiFUt+5iHdfQV0qq4/2vY+zkO+npXqvPrWoeDjAhnm6lUqlFqKjtEg+wWa8ZthT6KHlr7Fw95NbxytZtCPpEOxUPzhE27F04ETYMfF/LagnNYwEc43N9bHSlfuWEeLxA3UP6pH/oQnyR/q1475M5pJ2Kkh/L3Z6YWiTT7f1

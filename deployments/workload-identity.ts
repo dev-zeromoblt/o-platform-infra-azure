@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
+import * as authorization from "@pulumi/azure-native/authorization";
 
 export interface WorkloadIdentityConfig {
     provider: k8s.Provider;
@@ -10,12 +11,12 @@ export interface WorkloadIdentityConfig {
 }
 
 /**
- * Creates a ServiceAccount with workload identity annotations for AWS federation
+ * Creates a ServiceAccount with workload identity annotations for Azure AD integration
  *
- * After creating this, configure AWS IAM:
+ * After creating this, configure Azure workload identity:
  * 1. Get OIDC issuer URL from cluster output
- * 2. Create AWS IAM OIDC Identity Provider with the issuer URL
- * 3. Create IAM role with trust policy allowing the OIDC provider
+ * 2. Create Azure Managed Identity
+ * 3. Assign necessary Azure RBAC roles to the managed identity
  * 4. Add federated credential in Azure AD linking to this K8s service account
  */
 export function createWorkloadIdentityServiceAccount(config: WorkloadIdentityConfig) {
@@ -40,7 +41,7 @@ export function createWorkloadIdentityServiceAccount(config: WorkloadIdentityCon
                 annotations: {
                     "azure.workload.identity/client-id": config.azureClientId,
                     "azure.workload.identity/tenant-id": pulumi.output(
-                        require("@pulumi/azure-native").authorization.getClientConfig()
+                        authorization.getClientConfig()
                     ).tenantId,
                 },
                 labels: {

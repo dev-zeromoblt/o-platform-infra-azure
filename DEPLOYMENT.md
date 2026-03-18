@@ -66,7 +66,7 @@ pulumi stack init dev
 pulumi config set azure-native:location centralindia
 pulumi config set o-platform-infra-azure:environment dev
 pulumi config set o-platform-infra-azure:kubernetesVersion "1.32"
-pulumi config set o-platform-infra-azure:systemPoolVmSize Standard_D2ps_v5
+pulumi config set o-platform-infra-azure:systemPoolVmSize Standard_D4pds_v5
 pulumi config set o-platform-infra-azure:systemPoolMinCount 1
 pulumi config set o-platform-infra-azure:systemPoolMaxCount 3
 pulumi config set o-platform-infra-azure:domain dev.az.zeromoblt.com

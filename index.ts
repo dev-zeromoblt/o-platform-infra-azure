@@ -4,6 +4,7 @@ import { createAksCluster } from "./deployments/cluster";
 import { createDnsZone, createDnsARecord } from "./deployments/dns-zones";
 import { getIngressController } from "./deployments/ingress-controller";
 import { installCertManager } from "./deployments/cert-manager";
+import { createDnsDelegation } from "./deployments/dns-delegation";
 
 // Get configuration
 const config = new pulumi.Config();
@@ -17,7 +18,7 @@ const systemPoolMaxCount = config.requireNumber("systemPoolMaxCount");
 const sshPubKey = config.require("sshPubKey");
 const domain = config.require("domain");
 const location = azureConfig.require("location");
-const certManagerEmail = config.get("certManagerEmail") || `admin@${domain}`;
+const certEmail = config.get("certManagerEmail") || `admin@${domain}`;
 
 // Create main resource group for AKS
 const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-aks-rg`, {
@@ -30,7 +31,7 @@ const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-ak
 });
 
 // Create AKS Automatic cluster
-const { cluster, kubeconfig, clusterName, oidcIssuerUrl, fqdn } = createAksCluster({
+const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn } = createAksCluster({
     resourceGroupName: resourceGroup.name,
     environment,
     kubernetesVersion,
@@ -38,16 +39,17 @@ const { cluster, kubeconfig, clusterName, oidcIssuerUrl, fqdn } = createAksClust
     systemPoolMinCount,
     systemPoolMaxCount,
     sshPubKey,
+    adminUserObjectId: "1610c587-f138-4532-a530-6dcf885513c7",
 });
 
 // Get managed ingress controller IP
 const { provider: k8sProvider, ip: ingressIP } = getIngressController({
-    kubeconfig,
+    kubeconfig: clusterKubeconfig,
     environment,
 });
 
 // Create DNS zone
-const { zone: dnsZone, nameServers, resourceGroup: dnsResourceGroup } = createDnsZone({
+const { zone: dnsZone, nameServers: dnsNameServers, resourceGroup: dnsResourceGroup } = createDnsZone({
     environment,
     domain,
     location,
@@ -71,11 +73,37 @@ const wildcardARecord = createDnsARecord(
     environment
 );
 
+// For prod environment, create DNS delegation for dev subdomain
+let devDelegation: azurenative.network.RecordSet | undefined;
+if (environment === "prod") {
+    try {
+        // Reference the dev stack to get its DNS name servers
+        const devStack = new pulumi.StackReference("dev", {
+            name: `${pulumi.getOrganization()}/o-platform-infra-azure/dev`,
+        });
+
+        const devNameServers = devStack.getOutput("nameServers");
+
+        // Create NS records to delegate dev.az.zeromoblt.com to dev's DNS zone
+        devDelegation = createDnsDelegation({
+            parentZoneName: dnsZone.name,
+            parentResourceGroupName: dnsResourceGroup.name,
+            subdomain: "dev", // Just "dev" because we're in az.zeromoblt.com zone
+            nameServers: devNameServers,
+            environment: environment,
+        });
+
+        pulumi.log.info("✅ Created DNS delegation for dev.az subdomain");
+    } catch (error) {
+        pulumi.log.warn(`⚠️  Could not create DNS delegation for dev: ${error}`);
+    }
+}
+
 // Install cert-manager with Let's Encrypt
-const { chart: certManagerChart, clusterIssuerProd, clusterIssuerStaging } = installCertManager({
+const { release: certManagerRelease, clusterIssuerProd, clusterIssuerStaging } = installCertManager({
     provider: k8sProvider,
     environment,
-    email: certManagerEmail,
+    email: certEmail,
 });
 
 // Export stack outputs
@@ -84,10 +112,10 @@ export const outputs = {
     resourceGroupName: resourceGroup.name,
     clusterName: clusterName,
     clusterFqdn: fqdn,
-    kubeconfig: pulumi.secret(kubeconfig),
+    kubeconfig: pulumi.secret(clusterKubeconfig),
 
     // OIDC for workload identity
-    oidcIssuerUrl: oidcIssuerUrl,
+    oidcIssuerUrl: clusterOidcIssuerUrl,
 
     // Ingress
     ingressControllerIP: ingressIP,
@@ -96,10 +124,10 @@ export const outputs = {
     domain: domain,
     dnsZoneName: dnsZone.name,
     dnsResourceGroupName: dnsResourceGroup.name,
-    nameServers: nameServers,
+    nameServers: dnsNameServers,
 
     // Cert-manager
-    certManagerEmail: certManagerEmail,
+    certManagerEmail: certEmail,
 
     // Environment
     environment: environment,

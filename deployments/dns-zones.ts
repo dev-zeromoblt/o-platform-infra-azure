@@ -9,9 +9,9 @@ export interface DnsConfig {
 
 export function createDnsZone(config: DnsConfig) {
     // Create separate resource group for DNS (lifecycle management)
-    const dnsResourceGroup = new azurenative.resources.ResourceGroup(`dns-rg-${config.environment}`, {
+    const dnsResourceGroup = new azurenative.resources.ResourceGroup(`aks-dns-rg-${config.environment}`, {
         location: config.location,
-        resourceGroupName: `dns-rg-${config.environment}`,
+        resourceGroupName: `aks-dns-rg-${config.environment}`,
         tags: {
             environment: config.environment,
             managedBy: "pulumi",
@@ -54,9 +54,5 @@ export function createDnsARecord(
         aRecords: [{
             ipv4Address: ipAddress,
         }],
-        tags: {
-            environment: environment,
-            managedBy: "pulumi",
-        },
     });
 }

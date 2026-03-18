@@ -2,7 +2,7 @@ config:
   azure-native:location: centralindia
   o-platform-infra-azure:environment: beta
   o-platform-infra-azure:kubernetesVersion: "1.32"
-  o-platform-infra-azure:systemPoolVmSize: Standard_D4ps_v5
+  o-platform-infra-azure:systemPoolVmSize: Standard_D4pds_v5
   o-platform-infra-azure:systemPoolMinCount: "2"
   o-platform-infra-azure:systemPoolMaxCount: "6"
   o-platform-infra-azure:domain: beta.az.zeromoblt.com
