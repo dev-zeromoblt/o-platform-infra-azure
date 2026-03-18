@@ -1,0 +1,21 @@
+{
+  "name": "o-platform-infra-azure",
+  "version": "1.0.0",
+  "description": "Multi-environment AKS Automatic infrastructure deployment",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "pulumi up --stack dev",
+    "beta": "pulumi up --stack beta",
+    "prod": "pulumi up --stack prod"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.113.0",
+    "@pulumi/azure-native": "^2.60.0",
+    "@pulumi/kubernetes": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.6.0"
+  }
+}

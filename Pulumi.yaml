@@ -1,0 +1,6 @@
+name: o-platform-infra-azure
+description: Multi-environment AKS Automatic infrastructure deployment
+runtime:
+  name: nodejs
+  options:
+    typescript: true

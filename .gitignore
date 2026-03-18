@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+bin/
+*.js
+*.js.map
+*.d.ts
+
+# Pulumi
+.pulumi/
+
+# Kubeconfig files
+kubeconfig*.yaml
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

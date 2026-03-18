@@ -1,0 +1,72 @@
+# Example application deployment for testing AKS Automatic cluster
+# Demonstrates: ARM64 node selector, ingress, and TLS with cert-manager
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      # Target ARM64 nodes (NAP will provision if needed)
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      containers:
+      - name: hello-world
+        image: mcr.microsoft.com/azuredocs/aks-helloworld:v1
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+  namespace: default
+spec:
+  selector:
+    app: hello-world
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-world
+  namespace: default
+  annotations:
+    # Use staging issuer for testing, switch to letsencrypt-prod for production
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+spec:
+  ingressClassName: webapprouting.kubernetes.azure.com
+  tls:
+  - hosts:
+    - hello.dev.az.zeromoblt.com
+    secretName: hello-world-tls
+  rules:
+  - host: hello.dev.az.zeromoblt.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hello-world
+            port:
+              number: 80
