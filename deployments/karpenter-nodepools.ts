@@ -72,8 +72,8 @@ export function createRedpandaNodePool(config: KarpenterNodePoolConfig) {
                                 key: "node.kubernetes.io/instance-type",
                                 operator: "In",
                                 values: [
+                                    "Standard_D2pds_v5",
                                     "Standard_D4ps_v5",
-                                    "Standard_D8ps_v5"
                                 ],
                             },
                             {

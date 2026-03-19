@@ -53,7 +53,7 @@ export function createAksCluster(config: ClusterConfig) {
             ...(config.environment === "prod" ? [{
                 name: "data",
                 mode: "User" as const,
-                vmSize: "Standard_D4pds_v5",  // Must have ≥128 GB temp storage for ephemeral OS
+                vmSize: "Standard_D2pds_v5",  // Must have ≥128 GB temp storage for ephemeral OS
                 osType: "Linux" as const,
                 osSKU: "AzureLinux" as const,
                 count: 3,
