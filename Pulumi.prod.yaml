@@ -1,8 +1,8 @@
 config:
-  azure-native:location: centralindia
+  azure-native:location: southeastasia
   o-platform-infra-azure:environment: prod
   o-platform-infra-azure:kubernetesVersion: "1.32"
-  o-platform-infra-azure:systemPoolVmSize: Standard_D8pds_v5
+  o-platform-infra-azure:systemPoolVmSize: Standard_D4pds_v5
   o-platform-infra-azure:systemPoolMinCount: "3"
   o-platform-infra-azure:systemPoolMaxCount: "10"
   o-platform-infra-azure:domain: az.zeromoblt.com

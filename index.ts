@@ -5,6 +5,7 @@ import { createDnsZone, createDnsARecord } from "./deployments/dns-zones";
 import { getIngressController } from "./deployments/ingress-controller";
 import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
+// Removed: Karpenter NodePools - AKS Automatic handles workload provisioning
 
 // Get configuration
 const config = new pulumi.Config();
@@ -105,6 +106,8 @@ const { release: certManagerRelease, clusterIssuerProd, clusterIssuerStaging } =
     environment,
     email: certEmail,
 });
+
+// Removed: Karpenter NodePools - AKS Automatic handles workload provisioning automatically
 
 // Export stack outputs
 export const outputs = {
