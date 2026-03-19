@@ -36,17 +36,32 @@ export function createAksCluster(config: ClusterConfig) {
 
         // System node pool (required even in Automatic mode)
         // Note: enableAutoScaling must be false when using NAP (Node Auto-Provisioning)
-        agentPoolProfiles: [{
-            name: "system",
-            mode: "System",
-            vmSize: config.systemPoolVmSize,
-            osType: "Linux",
-            osSKU: "AzureLinux",
-            count: config.systemPoolMinCount,
-            enableAutoScaling: false,
-            type: "VirtualMachineScaleSets",
-            enableNodePublicIP: false,
-        }],
+        // Note: AKS Automatic requires ephemeral OS disks, so VM size must have ≥128 GB temp storage
+        agentPoolProfiles: [
+            {
+                name: "system",
+                mode: "System",
+                vmSize: config.systemPoolVmSize,
+                osType: "Linux",
+                osSKU: "AzureLinux",
+                count: config.systemPoolMinCount,
+                enableAutoScaling: false,
+                type: "VirtualMachineScaleSets",
+                enableNodePublicIP: false,
+            },
+            // Add data node pool only for production
+            ...(config.environment === "prod" ? [{
+                name: "data",
+                mode: "User" as const,
+                vmSize: "Standard_D4pds_v5",  // Must have ≥128 GB temp storage for ephemeral OS
+                osType: "Linux" as const,
+                osSKU: "AzureLinux" as const,
+                count: 3,
+                enableAutoScaling: false,
+                type: "VirtualMachineScaleSets" as const,
+                enableNodePublicIP: false,
+            }] : []),
+        ],
 
         // Azure CNI Overlay with Cilium (preconfigured in Automatic)
         networkProfile: {
@@ -60,7 +75,7 @@ export function createAksCluster(config: ClusterConfig) {
         },
 
         // Note: Node Auto-Provisioning (NAP) is automatically enabled in AKS Automatic mode
-        // No explicit configuration needed - it's part of the Automatic SKU
+        // ARM64 configuration will be applied post-deployment via scripts/configure-arm64-nap.sh
 
         // Auto-upgrade configuration
         autoUpgradeProfile: {
@@ -100,7 +115,9 @@ export function createAksCluster(config: ClusterConfig) {
             },
         },
 
-        // Auto-scaler profile
+        // Auto-scaler profile for NAP behavior
+        // Note: NAP in AKS Automatic will provision ARM64 nodes (Dpsv5/Dplsv5/Epsv5 families) by default
+        // Workloads can override by using nodeSelector for specific agent pools (e.g., "data" pool)
         autoScalerProfile: {
             scaleDownDelayAfterAdd: "10m",
             scaleDownUnneededTime: "10m",
