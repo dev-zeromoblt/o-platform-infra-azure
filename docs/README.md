@@ -97,11 +97,33 @@ pulumi up
 
 ## Accessing Clusters
 
-### Get Kubeconfig
+### Option 1: Merge Kubeconfig (Recommended)
+
+Merge into your default `~/.kube/config` for easy access:
 
 ```bash
-pulumi stack output kubeconfig --show-secrets > kubeconfig-dev.yaml
-export KUBECONFIG=kubeconfig-dev.yaml
+# Get cluster name
+CLUSTER_NAME=$(pulumi stack output aksClusterName)
+
+# Merge kubeconfig with friendly context name
+az aks get-credentials \
+  --resource-group prod-aks-rg \
+  --name $CLUSTER_NAME \
+  --overwrite-existing \
+  --context prod-aks
+
+# Use kubectl or k9s
+kubectl --context prod-aks get nodes
+k9s --context prod-aks
+```
+
+### Option 2: Export Kubeconfig (Temporary)
+
+For temporary access in current shell:
+
+```bash
+pulumi stack output kubeconfig --show-secrets > kubeconfig-prod.yaml
+export KUBECONFIG=kubeconfig-prod.yaml
 kubectl get nodes
 ```
 

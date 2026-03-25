@@ -5,6 +5,7 @@ import { createDnsZone, createDnsARecord } from "./deployments/dns-zones";
 import { getIngressController } from "./deployments/ingress-controller";
 import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
+import { createAcr } from "./deployments/acr";
 // Removed: Karpenter NodePools - AKS Automatic handles workload provisioning
 
 // Get configuration
@@ -20,6 +21,7 @@ const sshPubKey = config.require("sshPubKey");
 const domain = config.require("domain");
 const location = azureConfig.require("location");
 const certEmail = config.get("certManagerEmail") || `admin@${domain}`;
+const adminUserObjectId = config.get("adminUserObjectId"); // Optional: User/SP object ID for Azure RBAC
 
 // Create main resource group for AKS
 const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-aks-rg`, {
@@ -31,8 +33,15 @@ const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-ak
     },
 });
 
+// Create Azure Container Registry
+const acr = createAcr({
+    resourceGroupName: resourceGroup.name,
+    environment,
+    location,
+});
+
 // Create AKS Automatic cluster
-const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn } = createAksCluster({
+const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn, roleAssignment } = createAksCluster({
     resourceGroupName: resourceGroup.name,
     environment,
     kubernetesVersion,
@@ -40,13 +49,15 @@ const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clus
     systemPoolMinCount,
     systemPoolMaxCount,
     sshPubKey,
-    adminUserObjectId: "1610c587-f138-4532-a530-6dcf885513c7",
+    adminUserObjectId: adminUserObjectId,
 });
 
 // Get managed ingress controller IP
+// Note: If roleAssignment exists, Kubernetes provider should depend on it
 const { provider: k8sProvider, ip: ingressIP } = getIngressController({
     kubeconfig: clusterKubeconfig,
     environment,
+    dependsOn: roleAssignment ? [roleAssignment] : [],
 });
 
 // Create DNS zone
@@ -76,6 +87,7 @@ const wildcardARecord = createDnsARecord(
 
 // For prod environment, create DNS delegation for dev subdomain
 let devDelegation: azurenative.network.RecordSet | undefined;
+let prodDelegation: azurenative.network.RecordSet | undefined;
 if (environment === "prod") {
     try {
         // Reference the dev stack to get its DNS name servers
@@ -97,6 +109,28 @@ if (environment === "prod") {
         pulumi.log.info("✅ Created DNS delegation for dev.az subdomain");
     } catch (error) {
         pulumi.log.warn(`⚠️  Could not create DNS delegation for dev: ${error}`);
+    }
+
+    try {
+        // Reference the beta stack to get its DNS name servers
+        const betaStack = new pulumi.StackReference("beta", {
+            name: `${pulumi.getOrganization()}/o-platform-infra-azure/beta`,
+        });
+
+        const betaNameServers = betaStack.getOutput("nameServers");
+
+        // Create NS records to delegate beta.az.zeromoblt.com to beta's DNS zone
+        devDelegation = createDnsDelegation({
+            parentZoneName: dnsZone.name,
+            parentResourceGroupName: dnsResourceGroup.name,
+            subdomain: "beta", // Just "beta" because we're in az.zeromoblt.com zone
+            nameServers: betaNameServers,
+            environment: environment,
+        });
+
+        pulumi.log.info("✅ Created DNS delegation for beta.az subdomain");
+    } catch (error) {
+        pulumi.log.warn(`⚠️  Could not create DNS delegation for beta: ${error}`);
     }
 }
 
@@ -132,6 +166,11 @@ export const outputs = {
     // Cert-manager
     certManagerEmail: certEmail,
 
+    // ACR (Azure Container Registry)
+    acrLoginServer: acr.loginServer,
+    acrUsername: acr.username,
+    acrPassword: pulumi.secret(acr.password),
+
     // Environment
     environment: environment,
     location: location,
@@ -149,3 +188,6 @@ export const dnsZoneName = outputs.dnsZoneName;
 export const dnsResourceGroupName = outputs.dnsResourceGroupName;
 export const nameServers = outputs.nameServers;
 export const certManagerEmail = outputs.certManagerEmail;
+export const acrLoginServer = outputs.acrLoginServer;
+export const acrUsername = outputs.acrUsername;
+export const acrPassword = outputs.acrPassword;

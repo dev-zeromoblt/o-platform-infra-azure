@@ -4,12 +4,16 @@ import * as k8s from "@pulumi/kubernetes";
 export interface IngressConfig {
     kubeconfig: pulumi.Input<string>;
     environment: string;
+    dependsOn?: pulumi.Resource[];
 }
 
 export function getIngressController(config: IngressConfig) {
     // Create Kubernetes provider
+    // Note: dependsOn ensures RBAC role assignment completes before accessing cluster
     const k8sProvider = new k8s.Provider(`k8s-provider-${config.environment}`, {
         kubeconfig: config.kubeconfig,
+    }, {
+        dependsOn: config.dependsOn || [],
     });
 
     // AKS Automatic includes a managed NGINX ingress controller in app-routing-system namespace

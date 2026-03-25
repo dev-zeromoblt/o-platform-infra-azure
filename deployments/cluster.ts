@@ -145,8 +145,30 @@ export function createAksCluster(config: ClusterConfig) {
         Buffer.from(enc, "base64").toString()
     );
 
-    // Note: RBAC role assignment should be done manually or via separate deployment
-    // az role assignment create --assignee <user-id> --role "Azure Kubernetes Service RBAC Cluster Admin" --scope <cluster-id>
+    // Grant Azure RBAC Cluster Admin role to the specified user/service principal
+    // This is required when enableAzureRBAC is true (configured in aadProfile above)
+    // Role: Azure Kubernetes Service RBAC Cluster Admin (b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b)
+    let roleAssignment: azurenative.authorization.RoleAssignment | undefined;
+    if (config.adminUserObjectId) {
+        roleAssignment = new azurenative.authorization.RoleAssignment(
+            `${clusterName}-admin-rbac`,
+            {
+                principalId: config.adminUserObjectId,
+                // Azure Kubernetes Service RBAC Cluster Admin role
+                // Built-in role ID: b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b (Microsoft-defined constant)
+                roleDefinitionId: managedCluster.id.apply(clusterId => {
+                    // Extract subscription ID from cluster ID
+                    const subscriptionId = clusterId.split('/')[2];
+                    return `/subscriptions/${subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b`;
+                }),
+                scope: managedCluster.id,
+                principalType: "User",
+            },
+            {
+                dependsOn: [managedCluster],
+            }
+        );
+    }
 
     return {
         cluster: managedCluster,
@@ -154,5 +176,6 @@ export function createAksCluster(config: ClusterConfig) {
         clusterName: managedCluster.name,
         oidcIssuerUrl: managedCluster.oidcIssuerProfile.apply(profile => profile?.issuerURL || ""),
         fqdn: managedCluster.fqdn,
+        roleAssignment: roleAssignment,
     };
 }
