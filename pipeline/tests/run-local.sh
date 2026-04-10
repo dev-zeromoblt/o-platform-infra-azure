@@ -12,7 +12,7 @@
 #   - kubectl configured        (pulumi stack output kubeconfig)
 #   - kubelogin installed       (for AKS SP auth)
 #   - docker running            (for acr.test.ts)
-#   - npm ci already run        (cd pipeline/tests && npm ci)
+#   - yarn already run           (cd pipeline/tests && yarn install)
 #
 # Environment variables (optional — override stack outputs):
 #   AZURE_SUBSCRIPTION_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID
@@ -67,7 +67,7 @@ export TEST_ENVIRONMENT="$STACK"
 
 # ── 4. Run tests ──────────────────────────────────────────────────────────
 cd "$SCRIPT_DIR"
-npm ci --silent
+yarn install --frozen-lockfile --silent
 
 echo "Running tests matching: $PATTERN"
 echo "────────────────────────────────────────"

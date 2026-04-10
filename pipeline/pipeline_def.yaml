@@ -42,9 +42,11 @@ stages:
           - task: NodeTool@0
             inputs:
               versionSpec: '22.x'
+          - script: npm install -g yarn
+            displayName: 'Install Yarn'
           - script: |
               cd pipeline/tests
-              npm ci
+              yarn install --frozen-lockfile
               npx tsc --noEmit
               npx jest pipeline-validation.test.ts --ci
             displayName: 'Run pipeline-validation.test.ts'

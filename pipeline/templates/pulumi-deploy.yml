@@ -24,9 +24,12 @@ steps:
     inputs:
       versionSpec: '22.x'
 
+  - script: npm install -g yarn
+    displayName: 'Install Yarn'
+
   - script: |
       set -e
-      npm ci
+      yarn install --frozen-lockfile
     displayName: 'Install dependencies'
     workingDirectory: $(Agent.BuildDirectory)/$(workingDirectory)
 
