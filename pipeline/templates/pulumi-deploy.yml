@@ -52,7 +52,7 @@ steps:
   - script: |
       set -e
       echo "Running preview for ${{ parameters.environment }}..."
-      pulumi preview --stack ${{ parameters.stack }} --diff --parallel 50
+      pulumi preview --stack ${{ parameters.stack }} --diff --parallel 10
     displayName: 'Pulumi preview — ${{ parameters.environment }}'
     workingDirectory: $(Agent.BuildDirectory)/$(workingDirectory)
     env:
@@ -66,7 +66,7 @@ steps:
   - script: |
       set -e
       echo "Deploying to ${{ parameters.environment }}..."
-      pulumi up --stack ${{ parameters.stack }} --yes --skip-preview --parallel 50
+      pulumi up --stack ${{ parameters.stack }} --yes --skip-preview --parallel 10
       echo "✓ Deploy to ${{ parameters.environment }} complete"
     displayName: 'Deploy — ${{ parameters.environment }}'
     workingDirectory: $(Agent.BuildDirectory)/$(workingDirectory)
