@@ -4,4 +4,4 @@ runtime:
   name: nodejs
   options:
     typescript: true
-    nodeargs: "--max-old-space-size=2048"
+    nodeargs: "--max-old-space-size=4096"

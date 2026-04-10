@@ -33,8 +33,12 @@ export function installCertManager(config: CertManagerConfig) {
                 repo: "https://charts.jetstack.io",
             },
             namespace: certManagerNamespace.metadata.name,
+            skipCrds: false,
             values: {
-                installCRDs: true,
+                crds: {
+                    enabled: true,
+                    keep: true,
+                },
                 global: {
                     leaderElection: {
                         namespace: "cert-manager",

@@ -22,7 +22,7 @@ steps:
   - task: NodeTool@0
     displayName: 'Install Node.js 22'
     inputs:
-      versionSpec: '22.x'
+      versionSpec: '20.x'
 
   - script: npm install -g yarn
     displayName: 'Install Yarn'
