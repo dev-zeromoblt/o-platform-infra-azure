@@ -71,8 +71,7 @@ pulumi stack output
 ## Deploy Test Application
 
 ```bash
-# Deploy hello-world app with TLS
-kubectl apply -f examples/test-app.yaml
+# Deploy a hello-world app with TLS (see DEPLOYMENT.md for sample manifests)
 
 # Wait for certificate (2-3 minutes)
 kubectl get certificate -w
@@ -102,8 +101,7 @@ nslookup dev.az.zeromoblt.com
 ## Test Node Auto-Provisioning
 
 ```bash
-# Deploy workload that triggers NAP
-kubectl apply -f examples/nap-test.yaml
+# Deploy a resource-intensive workload to trigger NAP (see DEPLOYMENT.md for sample manifests)
 
 # Watch nodes being created
 kubectl get nodes -w
@@ -112,7 +110,7 @@ kubectl get nodes -w
 kubectl get nodepools
 
 # Cleanup (watch nodes scale down after 10 min)
-kubectl delete -f examples/nap-test.yaml
+# Delete the test workload
 ```
 
 ## Deploy Beta and Prod
@@ -155,7 +153,7 @@ const k8sProvider = new k8s.Provider("k8s", { kubeconfig });
 - Read [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment guide
 - Review [OPERATIONS.md](OPERATIONS.md) for daily operations
 - See [README.md](README.md) for architecture overview
-- Check [examples/](examples/) for more Kubernetes manifests
+- See [DEPLOYMENT.md](DEPLOYMENT.md) for sample Kubernetes manifests
 
 ## Cost Summary
 

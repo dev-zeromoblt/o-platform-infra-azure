@@ -26,10 +26,9 @@ o-platform-infra-azure/
 │   ├── ingress-controller.ts         # Managed NGINX ingress
 │   ├── cert-manager.ts               # Let's Encrypt TLS certificates
 │   └── workload-identity.ts          # OIDC/AWS federation support
-└── examples/
-    ├── test-app.yaml                 # Hello-world app with ingress/TLS
-    ├── nap-test.yaml                 # Node Auto-Provisioning demo
-    └── workload-identity-example.yaml # Workload identity demo
+└── deployments/
+    ├── ...
+    └── karpenter-patches.ts          # Karpenter NodePool patches for ARM64/spot
 ```
 
 ## Key Features Implemented
@@ -146,27 +145,6 @@ Each environment exports:
 - Emergency procedures
 - Compliance and auditing
 
-## Example Kubernetes Manifests
-
-### 1. test-app.yaml
-- Hello-world deployment
-- ARM64 node selector
-- Ingress configuration
-- TLS certificate with cert-manager
-- Production-ready example
-
-### 2. nap-test.yaml
-- NAP demonstration
-- Resource requests to trigger auto-provisioning
-- Monitoring instructions
-- Scale-down observation
-
-### 3. workload-identity-example.yaml
-- ServiceAccount with workload identity
-- Pod with identity annotations
-- Azure CLI test container
-- Testing instructions
-
 ## Git Repository
 
 Initialized with comprehensive commit:
@@ -212,10 +190,7 @@ Initialized with comprehensive commit:
    kubectl get nodes
    ```
 
-5. **Deploy Test App**:
-   ```bash
-   kubectl apply -f examples/test-app.yaml
-   ```
+5. **Deploy Test App** (see DEPLOYMENT.md for sample manifests)
 
 6. **Configure DNS Delegation**:
    ```bash

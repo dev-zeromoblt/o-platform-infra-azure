@@ -76,7 +76,7 @@ export function createAksCluster(config: ClusterConfig) {
         },
 
         // Note: Node Auto-Provisioning (NAP) is automatically enabled in AKS Automatic mode
-        // ARM64 configuration will be applied post-deployment via scripts/configure-arm64-nap.sh
+        // ARM64 configuration is applied via karpenter-patches.ts
 
         // Auto-upgrade configuration
         autoUpgradeProfile: {

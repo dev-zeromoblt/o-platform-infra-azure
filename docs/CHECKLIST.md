@@ -80,7 +80,7 @@ Use this checklist before deploying each environment to ensure all prerequisites
 - [ ] Verify: `dig dev.az.zeromoblt.com`
 
 ### Application Testing
-- [ ] Deploy test app: `kubectl apply -f examples/test-app.yaml`
+- [ ] Deploy a test app (e.g., hello-world deployment with ingress)
 - [ ] Wait for pod: `kubectl get pods -w`
 - [ ] Check service: `kubectl get svc hello-world`
 - [ ] Check ingress: `kubectl get ingress hello-world`
@@ -89,12 +89,11 @@ Use this checklist before deploying each environment to ensure all prerequisites
 - [ ] Test HTTPS: `curl https://hello.dev.az.zeromoblt.com`
 
 ### NAP Testing
-- [ ] Deploy NAP test: `kubectl apply -f examples/nap-test.yaml`
+- [ ] Deploy a resource-intensive workload to trigger NAP
 - [ ] Watch nodes: `kubectl get nodes -w`
 - [ ] Verify new nodes created
 - [ ] Check node pools: `kubectl get nodepools`
-- [ ] Delete NAP test: `kubectl delete -f examples/nap-test.yaml`
-- [ ] Observe scale-down after 10 minutes
+- [ ] Delete test workload and observe scale-down after 10 minutes
 
 ### Documentation
 - [ ] Document cluster details in team wiki

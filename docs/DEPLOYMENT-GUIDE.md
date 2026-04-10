@@ -163,19 +163,9 @@ This will:
 4. Install cert-manager
 5. Configure ingress controller
 
-#### Step 3: Configure ARM64 Node Auto-Provisioning
+#### Step 3: ARM64 Node Auto-Provisioning
 
-```bash
-# Run the post-deployment script
-./scripts/configure-arm64-nap.sh prod
-```
-
-### Alternative: Automated Deployment Script
-
-```bash
-# This handles both infrastructure and ARM64 configuration
-./scripts/deploy.sh prod --yes
-```
+ARM64 configuration is applied automatically via Karpenter NodePool patches in the Pulumi deployment (`karpenter-patches.ts`). No manual post-deployment step is needed.
 
 ---
 
@@ -458,10 +448,7 @@ pulumi config set adminUserObjectId "$(az ad signed-in-user show --query id -o t
 # 2. Deploy everything
 pulumi up
 
-# 3. Configure ARM64
-./scripts/configure-arm64-nap.sh prod
-
-# 4. Merge kubeconfig for easy access
+# 3. Merge kubeconfig for easy access
 CLUSTER_NAME=$(pulumi stack output aksClusterName)
 az aks get-credentials \
   --resource-group prod-aks-rg \
@@ -469,12 +456,12 @@ az aks get-credentials \
   --overwrite-existing \
   --context prod-aks
 
-# 5. Verify deployment
+# 4. Verify deployment
 kubectl --context prod-aks get nodes -o wide
 kubectl --context prod-aks get pods --all-namespaces
 pulumi stack output
 
-# 6. Launch k9s (optional)
+# 5. Launch k9s (optional)
 k9s --context prod-aks
 ```
 
@@ -501,4 +488,4 @@ k9s --context prod-aks
 For issues, check:
 - `OPERATIONS.md` - Day-to-day operations
 - `TROUBLESHOOTING.md` - Common problems and solutions
-- `scripts/README.md` - Deployment automation
+- `deployments/karpenter-patches.ts` - Karpenter NodePool patches
