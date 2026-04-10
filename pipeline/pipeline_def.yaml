@@ -17,16 +17,6 @@ pr:
     exclude:
       - '*.md'
 
-resources:
-  repositories:
-    - repository: self
-      type: github
-      endpoint: PlatformStreams
-      name: dev-zeromoblt/o-platform-infra-azure
-      trigger:
-        branches:
-          include: [main]
-
 variables:
   - group: azure-credentials
   - name: workingDirectory
