@@ -1,0 +1,322 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-infra
+
+permissions:
+  contents: read
+
+env:
+  PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  NODE_OPTIONS: "--max-old-space-size=4096"
+
+jobs:
+  # ───────────────────────────────────────
+  #  BETA
+  # ───────────────────────────────────────
+  deploy-beta:
+    name: Deploy to Beta
+    runs-on: ubuntu-latest
+    outputs:
+      resourceGroupName: ${{ steps.pulumi.outputs.resourceGroupName }}
+      aksClusterName: ${{ steps.pulumi.outputs.aksClusterName }}
+      ingressControllerIP: ${{ steps.pulumi.outputs.ingressControllerIP }}
+      acrLoginServer: ${{ steps.pulumi.outputs.acrLoginServer }}
+      acrUsername: ${{ steps.pulumi.outputs.acrUsername }}
+      acrPassword: ${{ steps.pulumi.outputs.acrPassword }}
+      dnsZoneName: ${{ steps.pulumi.outputs.dnsZoneName }}
+      dnsResourceGroupName: ${{ steps.pulumi.outputs.dnsResourceGroupName }}
+      domainName: ${{ steps.pulumi.outputs.domainName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Deploy to Beta
+        id: pulumi
+        uses: pulumi/actions@v6
+        with:
+          command: up
+          stack-name: beta
+
+  test-beta:
+    name: Integration Tests (Beta)
+    needs: deploy-beta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "${{ needs.deploy-beta.outputs.resourceGroupName }}" \
+            --name "${{ needs.deploy-beta.outputs.aksClusterName }}" \
+            --overwrite-existing
+
+      - name: Run integration tests
+        run: yarn test:integration
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          STACK_AKSCLUSTERNAME: ${{ needs.deploy-beta.outputs.aksClusterName }}
+          STACK_RESOURCEGROUPNAME: ${{ needs.deploy-beta.outputs.resourceGroupName }}
+          STACK_INGRESSCONTROLLERIP: ${{ needs.deploy-beta.outputs.ingressControllerIP }}
+          STACK_ACRLOGINSERVER: ${{ needs.deploy-beta.outputs.acrLoginServer }}
+          STACK_ACRUSERNAME: ${{ needs.deploy-beta.outputs.acrUsername }}
+          STACK_ACRPASSWORD: ${{ needs.deploy-beta.outputs.acrPassword }}
+          STACK_DNSZONENAME: ${{ needs.deploy-beta.outputs.dnsZoneName }}
+          STACK_DNSRESOURCEGROUPNAME: ${{ needs.deploy-beta.outputs.dnsResourceGroupName }}
+          STACK_DOMAINNAME: ${{ needs.deploy-beta.outputs.domainName }}
+          JEST_JUNIT_OUTPUT_DIR: test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beta-integration-results
+          path: test-results/
+
+  rollback-beta:
+    name: Rollback Beta
+    needs: [deploy-beta, test-beta]
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-beta.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Cancel any in-progress Pulumi operation
+        run: pulumi cancel --stack beta --yes || true
+
+      - name: Refresh Beta state
+        uses: pulumi/actions@v6
+        with:
+          command: refresh
+          stack-name: beta
+          expect-no-changes: false
+
+  # ───────────────────────────────────────
+  #  PROD
+  # ───────────────────────────────────────
+  deploy-prod:
+    name: Deploy to Prod
+    needs: [deploy-beta, test-beta]
+    runs-on: ubuntu-latest
+    outputs:
+      resourceGroupName: ${{ steps.pulumi.outputs.resourceGroupName }}
+      aksClusterName: ${{ steps.pulumi.outputs.aksClusterName }}
+      ingressControllerIP: ${{ steps.pulumi.outputs.ingressControllerIP }}
+      acrLoginServer: ${{ steps.pulumi.outputs.acrLoginServer }}
+      acrUsername: ${{ steps.pulumi.outputs.acrUsername }}
+      acrPassword: ${{ steps.pulumi.outputs.acrPassword }}
+      dnsZoneName: ${{ steps.pulumi.outputs.dnsZoneName }}
+      dnsResourceGroupName: ${{ steps.pulumi.outputs.dnsResourceGroupName }}
+      domainName: ${{ steps.pulumi.outputs.domainName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Deploy to Prod
+        id: pulumi
+        uses: pulumi/actions@v6
+        with:
+          command: up
+          stack-name: prod
+
+  test-prod:
+    name: Integration Tests (Prod)
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "${{ needs.deploy-prod.outputs.resourceGroupName }}" \
+            --name "${{ needs.deploy-prod.outputs.aksClusterName }}" \
+            --overwrite-existing
+
+      - name: Run integration tests
+        run: yarn test:integration
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          STACK_AKSCLUSTERNAME: ${{ needs.deploy-prod.outputs.aksClusterName }}
+          STACK_RESOURCEGROUPNAME: ${{ needs.deploy-prod.outputs.resourceGroupName }}
+          STACK_INGRESSCONTROLLERIP: ${{ needs.deploy-prod.outputs.ingressControllerIP }}
+          STACK_ACRLOGINSERVER: ${{ needs.deploy-prod.outputs.acrLoginServer }}
+          STACK_ACRUSERNAME: ${{ needs.deploy-prod.outputs.acrUsername }}
+          STACK_ACRPASSWORD: ${{ needs.deploy-prod.outputs.acrPassword }}
+          STACK_DNSZONENAME: ${{ needs.deploy-prod.outputs.dnsZoneName }}
+          STACK_DNSRESOURCEGROUPNAME: ${{ needs.deploy-prod.outputs.dnsResourceGroupName }}
+          STACK_DOMAINNAME: ${{ needs.deploy-prod.outputs.domainName }}
+          JEST_JUNIT_OUTPUT_DIR: test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prod-integration-results
+          path: test-results/
+
+  rollback-prod:
+    name: Rollback Prod
+    needs: [deploy-prod, test-prod]
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-prod.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Cancel any in-progress Pulumi operation
+        run: pulumi cancel --stack prod --yes || true
+
+      - name: Refresh Prod state
+        uses: pulumi/actions@v6
+        with:
+          command: refresh
+          stack-name: prod
+          expect-no-changes: false
+
+  # ───────────────────────────────────────
+  #  NOTIFICATIONS
+  # ───────────────────────────────────────
+  notify:
+    name: Notify
+    needs: [deploy-beta, test-beta, deploy-prod, test-prod]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.test-prod.result }}" = "success" ]; then
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+            echo "message=Deployment to prod succeeded. All integration tests passed." >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.test-beta.result }}" = "failure" ]; then
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "message=Beta integration tests failed. Deployment stopped before prod. Beta rolled back." >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.deploy-beta.result }}" = "failure" ]; then
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "message=Beta deployment failed. Deployment stopped before prod." >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.deploy-prod.result }}" = "failure" ]; then
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "message=Prod deployment failed." >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.test-prod.result }}" = "failure" ]; then
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "message=Prod integration tests failed. Prod rolled back." >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "message=Deploy pipeline finished with unexpected state." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post summary
+        run: |
+          echo "## Deploy Pipeline Result: ${{ steps.status.outputs.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.status.outputs.message }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Stage | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy Beta | ${{ needs.deploy-beta.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test Beta | ${{ needs.test-beta.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy Prod | ${{ needs.deploy-prod.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test Prod | ${{ needs.test-prod.result }} |" >> "$GITHUB_STEP_SUMMARY"

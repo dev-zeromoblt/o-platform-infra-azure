@@ -5,17 +5,35 @@
   "main": "index.ts",
   "scripts": {
     "build": "tsc",
+    "lint": "eslint . --ext .ts --ignore-pattern 'bin/' --ignore-pattern 'node_modules/'",
+    "test": "jest --config jest.config.ts --passWithNoTests",
+    "test:unit": "jest --config jest.config.ts --testPathPattern='tests/unit' --passWithNoTests",
+    "test:integration": "jest --config jest.config.ts --testPathPattern='tests/integration' --passWithNoTests --runInBand",
+    "test:coverage": "jest --config jest.config.ts --coverage --passWithNoTests",
+    "audit:vulnerabilities": "npm audit --omit=dev || true",
     "dev": "pulumi up --stack dev",
     "beta": "pulumi up --stack beta",
     "prod": "pulumi up --stack prod"
   },
   "dependencies": {
-    "@pulumi/pulumi": "^3.113.0",
     "@pulumi/azure-native": "^2.60.0",
-    "@pulumi/kubernetes": "^4.18.0"
+    "@pulumi/kubernetes": "^4.18.0",
+    "@pulumi/pulumi": "^3.113.0"
   },
   "devDependencies": {
+    "@azure/arm-containerregistry": "^11.0.0",
+    "@azure/arm-containerservice": "^21.0.0",
+    "@azure/arm-dns": "^5.1.0",
+    "@azure/identity": "^4.0.0",
+    "@types/jest": "^29.5.0",
     "@types/node": "^20",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
+    "ts-jest": "^29.2.0",
+    "ts-node": "^10.9.0",
     "typescript": "^5.6.0"
   }
 }
