@@ -60,6 +60,7 @@ export function createAksCluster(config: ClusterConfig) {
                 enableAutoScaling: false,
                 type: "VirtualMachineScaleSets" as const,
                 enableNodePublicIP: false,
+                nodeTaints: ["workload=data:NoSchedule"],
             }] : []),
         ],
 

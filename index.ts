@@ -6,7 +6,7 @@ import { getIngressController } from "./deployments/ingress-controller";
 import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
 import { createAcr } from "./deployments/acr";
-// Removed: Karpenter NodePools - AKS Automatic handles workload provisioning
+import { patchKarpenterNodePools } from "./deployments/karpenter-patches";
 
 // Get configuration
 const config = new pulumi.Config();
@@ -141,7 +141,13 @@ const { release: certManagerRelease, clusterIssuerProd, clusterIssuerStaging } =
     email: certEmail,
 });
 
-// Removed: Karpenter NodePools - AKS Automatic handles workload provisioning automatically
+// Patch AKS-managed Karpenter NodePools for cost optimization:
+//  - default: enable spot instances alongside on-demand
+//  - system-surge: switch amd64 → arm64
+const karpenterPatches = patchKarpenterNodePools({
+    provider: k8sProvider,
+    environment,
+});
 
 // Export stack outputs
 export const outputs = {
