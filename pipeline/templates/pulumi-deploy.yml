@@ -52,18 +52,7 @@ steps:
   - script: |
       set -e
       echo "Running preview for ${{ parameters.environment }}..."
-      timeout 600 pulumi preview --stack ${{ parameters.stack }} --diff --show-config --json \
-        > preview-output.json || {
-        EXIT=$?
-        cat preview-output.json || true
-        exit $EXIT
-      }
-      echo "Preview complete:"
-      cat preview-output.json | python3 -c "
-      import json,sys
-      d=json.load(sys.stdin)
-      for s in d.get('steps',[]): print(s.get('op'), s.get('urn','').split('::')[-1])
-      " 2>/dev/null || true
+      pulumi preview --stack ${{ parameters.stack }} --diff --parallel 50
     displayName: 'Pulumi preview — ${{ parameters.environment }}'
     workingDirectory: $(Agent.BuildDirectory)/$(workingDirectory)
     env:
@@ -77,7 +66,7 @@ steps:
   - script: |
       set -e
       echo "Deploying to ${{ parameters.environment }}..."
-      pulumi up --stack ${{ parameters.stack }} --yes --skip-preview --logtostderr --verbose=3
+      pulumi up --stack ${{ parameters.stack }} --yes --skip-preview --parallel 50
       echo "✓ Deploy to ${{ parameters.environment }} complete"
     displayName: 'Deploy — ${{ parameters.environment }}'
     workingDirectory: $(Agent.BuildDirectory)/$(workingDirectory)
@@ -124,13 +113,6 @@ steps:
     inputs:
       pathToPublish: '$(Agent.BuildDirectory)/$(workingDirectory)/deployment-outputs.json'
       artifactName: 'deployment-outputs-${{ parameters.environment }}'
-
-  - task: PublishBuildArtifacts@1
-    displayName: 'Publish preview output'
-    condition: always()
-    inputs:
-      pathToPublish: '$(Agent.BuildDirectory)/$(workingDirectory)/preview-output.json'
-      artifactName: 'preview-output-${{ parameters.environment }}'
 
   - task: PublishBuildArtifacts@1
     displayName: 'Publish failure logs'
