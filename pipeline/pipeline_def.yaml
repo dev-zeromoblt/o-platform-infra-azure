@@ -27,7 +27,7 @@ variables:
     value: 'e6a89fd3-6fdf-4300-a991-0b47b2bec750'
 
 pool:
-  vmImage: 'ubuntu-latest-8'
+  vmImage: 'ubuntu-latest'
 
 # ── PR builds: static pipeline validation only (no deploy, no Azure creds) ──
 stages:
