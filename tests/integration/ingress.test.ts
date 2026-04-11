@@ -1,8 +1,8 @@
 /**
  * Ingress Controller — Live Verification
  *
- * Verifies the ingress controller is reachable and serving traffic:
- * - Ingress controller pod(s) are Running in the cluster
+ * Verifies the AKS managed ingress controller is reachable and serving traffic:
+ * - Ingress controller pod(s) are Running in the cluster (app-routing-system)
  * - TCP connect to ingressControllerIP:80 succeeds
  * - TCP connect to ingressControllerIP:443 succeeds
  * - HTTP GET returns any response (proves traffic reaches ingress)
@@ -19,8 +19,9 @@ describe("Ingress Controller", () => {
 
   it("ingress controller pods are Running", () => {
     const output = kubectl(
-      "get pods -n ingress-nginx --no-headers 2>/dev/null || " +
-      "kubectl get pods -A --no-headers -l app.kubernetes.io/name=ingress-nginx"
+      "get pods -n app-routing-system --no-headers 2>/dev/null || " +
+      "kubectl get pods -n ingress-nginx --no-headers 2>/dev/null || " +
+      "kubectl get pods -A --no-headers -l app.kubernetes.io/name=nginx"
     );
     const runningPods = output.split("\n").filter((line) => line.includes("Running")).length;
     expect(runningPods).toBeGreaterThan(0);
