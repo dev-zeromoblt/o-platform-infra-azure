@@ -18,6 +18,8 @@
   "exclude": [
     "node_modules",
     "bin",
-    "pipeline/tests"
+    "pipeline/tests",
+    "tests",
+    "jest.config.ts"
   ]
 }

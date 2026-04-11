@@ -17,6 +17,7 @@ kubeconfig*.yaml
 # Environment files
 .env
 .env.*
+.secrets
 
 # IDE
 .vscode/
@@ -28,3 +29,4 @@ kubeconfig*.yaml
 .DS_Store
 Thumbs.db
 .omc
+coverage

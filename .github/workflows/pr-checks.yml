@@ -1,0 +1,265 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-infra-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NODE_OPTIONS: "--max-old-space-size=4096"
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  AAD_LOGIN_METHOD: spn
+  AZURE_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  AZURE_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  AZURE_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+jobs:
+  # ─── Static Checks ───
+  validate:
+    name: Build, Lint & Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build TypeScript
+        run: yarn build
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Vulnerability scan
+        run: yarn audit --groups dependencies
+
+      - name: Unit tests with coverage
+        run: yarn test:coverage
+        env:
+          JEST_JUNIT_OUTPUT_DIR: test-results
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always() && !env.ACT
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always() && !env.ACT
+        with:
+          name: unit-test-results
+          path: test-results/
+
+  # ─── Pulumi Preview against Dev ───
+  preview-dev:
+    name: Pulumi Preview (Dev)
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+
+      - uses: pulumi/actions@v6
+        with:
+          command: preview
+          stack-name: dev
+          comment-on-pr: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+  # ─── Fetch Dev Stack Outputs ───
+  dev-outputs:
+    name: Fetch Dev Stack Outputs
+    needs: preview-dev
+    runs-on: ubuntu-latest
+    outputs:
+      resourceGroupName: ${{ steps.outputs.outputs.resourceGroupName }}
+      aksClusterName: ${{ steps.outputs.outputs.aksClusterName }}
+      ingressControllerIP: ${{ steps.outputs.outputs.ingressControllerIP }}
+      acrLoginServer: ${{ steps.outputs.outputs.acrLoginServer }}
+      acrUsername: ${{ steps.outputs.outputs.acrUsername }}
+      acrPassword: ${{ steps.outputs.outputs.acrPassword }}
+      dnsZoneName: ${{ steps.outputs.outputs.dnsZoneName }}
+      dnsResourceGroupName: ${{ steps.outputs.outputs.dnsResourceGroupName }}
+      domainName: ${{ steps.outputs.outputs.domainName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Cache Pulumi plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.pulumi/plugins
+          key: ${{ runner.os }}-pulumi-plugins-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-pulumi-plugins-
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Get dev stack outputs
+        id: outputs
+        run: |
+          pulumi stack select dev
+          echo "resourceGroupName=$(pulumi stack output resourceGroupName)" >> "$GITHUB_OUTPUT"
+          echo "aksClusterName=$(pulumi stack output aksClusterName)" >> "$GITHUB_OUTPUT"
+          echo "ingressControllerIP=$(pulumi stack output ingressControllerIP)" >> "$GITHUB_OUTPUT"
+          echo "acrLoginServer=$(pulumi stack output acrLoginServer)" >> "$GITHUB_OUTPUT"
+          echo "acrUsername=$(pulumi stack output acrUsername)" >> "$GITHUB_OUTPUT"
+          echo "acrPassword=$(pulumi stack output acrPassword --show-secrets)" >> "$GITHUB_OUTPUT"
+          echo "dnsZoneName=$(pulumi stack output dnsZoneName)" >> "$GITHUB_OUTPUT"
+          echo "dnsResourceGroupName=$(pulumi stack output dnsResourceGroupName)" >> "$GITHUB_OUTPUT"
+          echo "domainName=$(pulumi stack output domainName)" >> "$GITHUB_OUTPUT"
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+  # ─── Integration Tests against Dev ───
+  test-dev:
+    name: Integration Tests (Dev)
+    needs: dev-outputs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "${{ needs.dev-outputs.outputs.resourceGroupName }}" \
+            --name "${{ needs.dev-outputs.outputs.aksClusterName }}" \
+            --overwrite-existing
+          kubelogin convert-kubeconfig -l spn --client-id "${{ secrets.ARM_CLIENT_ID }}" --client-secret "${{ secrets.ARM_CLIENT_SECRET }}" --tenant-id "${{ secrets.ARM_TENANT_ID }}"
+
+      - name: Run integration tests against dev
+        run: yarn test:integration
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          STACK_AKSCLUSTERNAME: ${{ needs.dev-outputs.outputs.aksClusterName }}
+          STACK_RESOURCEGROUPNAME: ${{ needs.dev-outputs.outputs.resourceGroupName }}
+          STACK_INGRESSCONTROLLERIP: ${{ needs.dev-outputs.outputs.ingressControllerIP }}
+          STACK_ACRLOGINSERVER: ${{ needs.dev-outputs.outputs.acrLoginServer }}
+          STACK_ACRUSERNAME: ${{ needs.dev-outputs.outputs.acrUsername }}
+          STACK_ACRPASSWORD: ${{ needs.dev-outputs.outputs.acrPassword }}
+          STACK_DNSZONENAME: ${{ needs.dev-outputs.outputs.dnsZoneName }}
+          STACK_DNSRESOURCEGROUPNAME: ${{ needs.dev-outputs.outputs.dnsResourceGroupName }}
+          STACK_DOMAINNAME: ${{ needs.dev-outputs.outputs.domainName }}
+          JEST_JUNIT_OUTPUT_DIR: test-results
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always() && !env.ACT
+        with:
+          name: dev-integration-results
+          path: test-results/
+
+  # ─── Request Changes on Failure ───
+  request-changes:
+    name: Request Changes on Failure
+    needs: [validate, preview-dev, test-dev]
+    runs-on: ubuntu-latest
+    if: failure()
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Request changes on PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+
+            const failed = jobs.jobs
+              .filter(j => j.conclusion === 'failure')
+              .map(j => `- **${j.name}**: failed`)
+              .join('\n');
+
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              event: 'REQUEST_CHANGES',
+              body: `## PR Checks Failed\n\nThe following checks did not pass:\n\n${failed}\n\nPlease fix and push again.`,
+            });
