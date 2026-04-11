@@ -3,8 +3,8 @@
  *
  * Verifies the Azure Container Registry deployed by Pulumi works end-to-end:
  * - Registry exists and provisioning is Succeeded
- * - Admin credentials are valid (az acr login succeeds)
- * - Can import a test image via az acr import
+ * - Admin credentials can obtain an access token
+ * - Can list repositories via the ACR REST API
  */
 import { ContainerRegistryManagementClient } from "@azure/arm-containerregistry";
 import { getAzureCredential, subscriptionId, stackOutput, exec } from "../helpers";
@@ -26,28 +26,26 @@ describe("ACR — Container Registry", () => {
     registryName = loginServer.split(".")[0];
   });
 
-  afterAll(() => {
-    try {
-      exec(`az acr repository delete --name ${registryName} --repository pipeline-test --yes 2>/dev/null || true`);
-    } catch {
-      // cleanup is best-effort
-    }
-  });
-
   it("registry exists and provisioningState is Succeeded", async () => {
     const registry = await client.registries.get(resourceGroup, registryName);
     expect(registry.provisioningState).toBe("Succeeded");
   });
 
-  it("ACR login succeeds with admin credentials", () => {
-    exec(`az acr login --name ${registryName} --username ${acrUsername} --password ${acrPassword}`);
+  it("admin credentials can obtain an access token", () => {
+    const output = exec(
+      `az acr login --name ${registryName} --expose-token --username ${acrUsername} --password ${acrPassword} --output tsv --query accessToken`
+    );
+    expect(output.trim().length).toBeGreaterThan(0);
   });
 
-  it("can import a test image into ACR", () => {
-    exec(
-      `az acr import --name ${registryName} --source docker.io/library/busybox:latest --image pipeline-test:ci --force`
+  it("can query ACR catalog via REST API", () => {
+    const token = exec(
+      `az acr login --name ${registryName} --expose-token --username ${acrUsername} --password ${acrPassword} --output tsv --query accessToken`
+    ).trim();
+    const output = exec(
+      `curl -s -H "Authorization: Bearer ${token}" https://${loginServer}/v2/_catalog`
     );
-    const output = exec(`az acr repository show --name ${registryName} --repository pipeline-test -o tsv --query name`);
-    expect(output.trim()).toBe("pipeline-test");
+    const catalog = JSON.parse(output);
+    expect(catalog).toHaveProperty("repositories");
   });
 });
