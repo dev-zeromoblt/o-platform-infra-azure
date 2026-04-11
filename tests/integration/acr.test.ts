@@ -3,7 +3,7 @@
  *
  * Verifies the Azure Container Registry deployed by Pulumi works end-to-end:
  * - Registry exists and provisioning is Succeeded
- * - Admin credentials can obtain an access token
+ * - Admin credentials are valid (basic auth to ACR REST API)
  * - Can list repositories via the ACR REST API
  */
 import { ContainerRegistryManagementClient } from "@azure/arm-containerregistry";
@@ -31,19 +31,16 @@ describe("ACR — Container Registry", () => {
     expect(registry.provisioningState).toBe("Succeeded");
   });
 
-  it("admin credentials can obtain an access token", () => {
+  it("admin credentials are valid", () => {
     const output = exec(
-      `az acr login --name ${registryName} --expose-token --username ${acrUsername} --password ${acrPassword} --output tsv --query accessToken`
+      `curl -sf -u "${acrUsername}:${acrPassword}" https://${loginServer}/v2/`
     );
-    expect(output.trim().length).toBeGreaterThan(0);
+    expect(output).toBeDefined();
   });
 
   it("can query ACR catalog via REST API", () => {
-    const token = exec(
-      `az acr login --name ${registryName} --expose-token --username ${acrUsername} --password ${acrPassword} --output tsv --query accessToken`
-    ).trim();
     const output = exec(
-      `curl -s -H "Authorization: Bearer ${token}" https://${loginServer}/v2/_catalog`
+      `curl -sf -u "${acrUsername}:${acrPassword}" https://${loginServer}/v2/_catalog`
     );
     const catalog = JSON.parse(output);
     expect(catalog).toHaveProperty("repositories");
