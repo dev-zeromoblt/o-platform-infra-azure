@@ -41,7 +41,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Cache Pulumi plugins
         uses: actions/cache@v4
@@ -53,6 +55,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
 
       - name: Deploy to Beta
         id: pulumi
@@ -71,10 +83,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
 
       - name: Azure Login
         uses: azure/login@v2
@@ -87,6 +106,7 @@ jobs:
             --resource-group "${{ needs.deploy-beta.outputs.resourceGroupName }}" \
             --name "${{ needs.deploy-beta.outputs.aksClusterName }}" \
             --overwrite-existing
+          kubelogin convert-kubeconfig -l spn --client-id "${{ secrets.ARM_CLIENT_ID }}" --client-secret "${{ secrets.ARM_CLIENT_SECRET }}" --tenant-id "${{ secrets.ARM_TENANT_ID }}"
 
       - name: Run integration tests
         run: yarn test:integration
@@ -108,7 +128,7 @@ jobs:
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && !env.ACT
         with:
           name: beta-integration-results
           path: test-results/
@@ -124,7 +144,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Cache Pulumi plugins
         uses: actions/cache@v4
@@ -136,6 +158,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
 
       - name: Cancel any in-progress Pulumi operation
         run: pulumi cancel --stack beta --yes || true
@@ -170,7 +202,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Cache Pulumi plugins
         uses: actions/cache@v4
@@ -182,6 +216,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
 
       - name: Deploy to Prod
         id: pulumi
@@ -200,10 +244,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
 
       - name: Azure Login
         uses: azure/login@v2
@@ -216,6 +267,7 @@ jobs:
             --resource-group "${{ needs.deploy-prod.outputs.resourceGroupName }}" \
             --name "${{ needs.deploy-prod.outputs.aksClusterName }}" \
             --overwrite-existing
+          kubelogin convert-kubeconfig -l spn --client-id "${{ secrets.ARM_CLIENT_ID }}" --client-secret "${{ secrets.ARM_CLIENT_SECRET }}" --tenant-id "${{ secrets.ARM_TENANT_ID }}"
 
       - name: Run integration tests
         run: yarn test:integration
@@ -237,7 +289,7 @@ jobs:
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && !env.ACT
         with:
           name: prod-integration-results
           path: test-results/
@@ -253,7 +305,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
+
+      - name: Enable corepack
+        run: corepack enable
 
       - name: Cache Pulumi plugins
         uses: actions/cache@v4
@@ -265,6 +319,16 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
+
+      - name: Install kubelogin
+        run: |
+          az aks install-cli 2>/dev/null || true
+          which kubelogin || (curl -sL https://github.com/Azure/kubelogin/releases/latest/download/kubelogin-linux-amd64.zip -o kubelogin.zip && unzip -o kubelogin.zip -d kubelogin && sudo mv kubelogin/bin/linux_amd64/kubelogin /usr/local/bin/ && rm -rf kubelogin kubelogin.zip)
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
 
       - name: Cancel any in-progress Pulumi operation
         run: pulumi cancel --stack prod --yes || true

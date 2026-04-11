@@ -9,7 +9,7 @@
     "test": "jest --config jest.config.ts --passWithNoTests",
     "test:unit": "jest --config jest.config.ts --testPathPattern='tests/unit' --passWithNoTests",
     "test:integration": "jest --config jest.config.ts --testPathPattern='tests/integration' --passWithNoTests --runInBand",
-    "test:coverage": "jest --config jest.config.ts --coverage --passWithNoTests",
+    "test:coverage": "jest --config jest.config.ts --testPathPattern='tests/unit' --coverage --passWithNoTests",
     "audit:vulnerabilities": "npm audit --omit=dev || true",
     "dev": "pulumi up --stack dev",
     "beta": "pulumi up --stack beta",

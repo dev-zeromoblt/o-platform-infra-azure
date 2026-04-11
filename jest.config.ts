@@ -24,6 +24,8 @@ const config: Config = {
     }],
   ],
   testTimeout: 60000,
+  watchman: false,
+  forceExit: true,
 };
 
 export default config;

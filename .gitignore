@@ -17,6 +17,7 @@ kubeconfig*.yaml
 # Environment files
 .env
 .env.*
+.secrets
 
 # IDE
 .vscode/
