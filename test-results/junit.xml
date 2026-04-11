@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="jest tests" tests="6" failures="0" errors="0" time="16.742">
-  <testsuite name="Project Validation" errors="0" failures="0" skipped="0" timestamp="2026-04-10T23:15:07" time="16.712" tests="6">
-    <testcase classname="Project Validation Pulumi.yaml exists and has correct project name" name="Project Validation Pulumi.yaml exists and has correct project name" time="0.002">
+<testsuites name="jest tests" tests="6" failures="0" errors="0" time="14.91">
+  <testsuite name="Project Validation" errors="0" failures="0" skipped="0" timestamp="2026-04-11T04:22:06" time="14.881" tests="6">
+    <testcase classname="Project Validation Pulumi.yaml exists and has correct project name" name="Project Validation Pulumi.yaml exists and has correct project name" time="0.001">
     </testcase>
-    <testcase classname="Project Validation all stack config files exist" name="Project Validation all stack config files exist" time="0.001">
+    <testcase classname="Project Validation all stack config files exist" name="Project Validation all stack config files exist" time="0">
     </testcase>
-    <testcase classname="Project Validation each stack config has required keys" name="Project Validation each stack config has required keys" time="0.008">
+    <testcase classname="Project Validation each stack config has required keys" name="Project Validation each stack config has required keys" time="0.002">
     </testcase>
     <testcase classname="Project Validation TypeScript compiles without errors" name="Project Validation TypeScript compiles without errors" time="0">
     </testcase>
-    <testcase classname="Project Validation all deployment modules are importable files" name="Project Validation all deployment modules are importable files" time="0.001">
+    <testcase classname="Project Validation all deployment modules are importable files" name="Project Validation all deployment modules are importable files" time="0">
     </testcase>
-    <testcase classname="Project Validation index.ts exports expected stack outputs" name="Project Validation index.ts exports expected stack outputs" time="0.002">
+    <testcase classname="Project Validation index.ts exports expected stack outputs" name="Project Validation index.ts exports expected stack outputs" time="0.001">
     </testcase>
   </testsuite>
 </testsuites>
