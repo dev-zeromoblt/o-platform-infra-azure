@@ -134,12 +134,10 @@ export function createRedis(config: RedisConfig): RedisOutputs {
   }
 
   // ── Access key (secret) ───────────────────────────────────────────────────
-  const primaryKey = pulumi
-    .all([resourceGroupName, cache.name])
-    .apply(([rgName, name]) =>
-      azurenative.cache.listRedisKeys({ resourceGroupName: rgName, name })
-    )
-    .apply((keys) => keys.primaryKey!);
+  // Read the key off the resource's own output, NOT the listRedisKeys invoke — the
+  // invoke runs eagerly at preview time and 404s before the cache exists. The resource
+  // output is "unknown" during preview, so the apply is skipped instead.
+  const primaryKey = cache.accessKeys.apply((keys) => keys.primaryKey);
 
   return {
     cache,
