@@ -6,6 +6,7 @@ import { getIngressController } from "./deployments/ingress-controller";
 import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
 import { createAcr } from "./deployments/acr";
+import { createRedis } from "./deployments/redis";
 import { patchKarpenterNodePools } from "./deployments/karpenter-patches";
 
 // Get configuration
@@ -38,6 +39,16 @@ const acr = createAcr({
     resourceGroupName: resourceGroup.name,
     environment,
     location,
+});
+
+// Create managed Azure Cache for Redis (private) — the mobility service's cache.
+// Optional: set `aksVnetId` in config once the AKS Automatic managed VNet id is known,
+// to peer it for pod reachability (see deployments/redis.ts).
+const redis = createRedis({
+    resourceGroupName: resourceGroup.name,
+    environment,
+    location,
+    aksVnetId: config.get("aksVnetId"),
 });
 
 // Create AKS Automatic cluster
@@ -177,6 +188,12 @@ export const outputs = {
     acrUsername: acr.username,
     acrPassword: pulumi.secret(acr.password),
 
+    // Redis (mobility service cache, private)
+    redisHostName: redis.hostName,
+    redisSslPort: redis.sslPort,
+    redisPrimaryKey: pulumi.secret(redis.primaryKey),
+    redisVnetId: redis.vnetId,
+
     // Environment
     environment: environment,
     location: location,
@@ -197,3 +214,7 @@ export const certManagerEmail = outputs.certManagerEmail;
 export const acrLoginServer = outputs.acrLoginServer;
 export const acrUsername = outputs.acrUsername;
 export const acrPassword = outputs.acrPassword;
+export const redisHostName = outputs.redisHostName;
+export const redisSslPort = outputs.redisSslPort;
+export const redisPrimaryKey = outputs.redisPrimaryKey;
+export const redisVnetId = outputs.redisVnetId;
