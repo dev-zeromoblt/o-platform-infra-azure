@@ -16,31 +16,33 @@ export interface RedisConfig {
 }
 
 export interface RedisOutputs {
-  cache: azurenative.cache.Redis;
+  cluster: azurenative.cache.RedisEnterprise;
+  database: azurenative.cache.Database;
   hostName: pulumi.Output<string>;
-  sslPort: pulumi.Output<number>;
+  port: pulumi.Output<number>;
   primaryKey: pulumi.Output<string>;
   vnetId: pulumi.Output<string>;
 }
 
 /**
- * Managed Azure Cache for Redis for the mobility service — private to the cluster.
+ * Azure Managed Redis (RedisEnterprise) for the mobility service — private to the cluster.
+ *
+ * Uses `Microsoft.Cache/redisEnterprise` because classic Azure Cache for Redis
+ * (`Microsoft.Cache/Redis`, Basic/Standard/Premium) is being retired.
  *
  * It is *just a cache*, written and read only by the mobility service (single writer per
  * domain after the whole-domain migration). Not shared with Lambda, no public exposure.
  *
- * SKU: dev = Basic C0 (single node, cheapest); beta/prod = Standard C1 (replicated, HA).
- * Access is private-only: public network access disabled, reached via a Private Endpoint
- * in a dedicated VNet with a privatelink private DNS zone. Peer that VNet to the AKS VNet
- * (aksVnetId) for pod reachability.
+ * SKU: dev = Balanced_B0 (smallest AMR tier); beta/prod = Balanced_B1 (HA is built in).
+ * Access is private-only: reached via a Private Endpoint in a dedicated VNet with the
+ * `privatelink.redisenterprise.cache.azure.net` private DNS zone. Peer that VNet to the AKS
+ * VNet (aksVnetId) for pod reachability.
  */
 export function createRedis(config: RedisConfig): RedisOutputs {
   const { resourceGroupName, environment, location, aksVnetId } = config;
   const isProd = environment !== "dev";
 
   // ── Dedicated VNet + subnet for the private endpoint ──────────────────────
-  // AKS Automatic runs in its own managed VNet; we host the private endpoint in a
-  // small dedicated VNet and peer it to the cluster.
   const vnet = new azurenative.network.VirtualNetwork(`redis-vnet-${environment}`, {
     virtualNetworkName: `${environment}-redis-vnet`,
     resourceGroupName,
@@ -57,26 +59,28 @@ export function createRedis(config: RedisConfig): RedisOutputs {
     privateEndpointNetworkPolicies: "Disabled",
   });
 
-  // ── The cache ─────────────────────────────────────────────────────────────
-  const cache = new azurenative.cache.Redis(`redis-${environment}`, {
-    name: `${environment}-mobility-redis`,
+  // ── The cache: Azure Managed Redis (RedisEnterprise cluster + default database) ──
+  const cluster = new azurenative.cache.RedisEnterprise(`redis-${environment}`, {
+    clusterName: `${environment}-mobility-redis`,
     resourceGroupName,
     location,
-    sku: {
-      name: isProd ? "Standard" : "Basic",
-      family: "C",
-      capacity: isProd ? 1 : 0,
-    },
+    sku: { name: isProd ? "Balanced_B1" : "Balanced_B0" },
     minimumTlsVersion: "1.2",
-    enableNonSslPort: false,
-    redisVersion: "6",
-    publicNetworkAccess: "Disabled",
     tags: { environment, managedBy: "pulumi", purpose: "mobility-cache" },
+  });
+
+  const database = new azurenative.cache.Database(`redis-db-${environment}`, {
+    databaseName: "default", // AMR requires the database be named "default"
+    clusterName: cluster.name,
+    resourceGroupName,
+    clientProtocol: "Encrypted", // TLS only
+    clusteringPolicy: "EnterpriseCluster", // single endpoint — drop-in for a standard client
+    evictionPolicy: "AllKeysLRU", // it's a cache: evict cold keys under memory pressure
   });
 
   // ── Private DNS zone for the privatelink hostname ─────────────────────────
   const dnsZone = new azurenative.network.PrivateZone(`redis-dns-${environment}`, {
-    privateZoneName: "privatelink.redis.cache.windows.net",
+    privateZoneName: "privatelink.redisenterprise.cache.azure.net",
     resourceGroupName,
     location: "global",
     tags: { environment, managedBy: "pulumi" },
@@ -100,8 +104,8 @@ export function createRedis(config: RedisConfig): RedisOutputs {
     privateLinkServiceConnections: [
       {
         name: `${environment}-redis-plsc`,
-        privateLinkServiceId: cache.id,
-        groupIds: ["redisCache"],
+        privateLinkServiceId: cluster.id,
+        groupIds: ["redisEnterprise"],
       },
     ],
   });
@@ -134,15 +138,25 @@ export function createRedis(config: RedisConfig): RedisOutputs {
   }
 
   // ── Access key (secret) ───────────────────────────────────────────────────
-  // Read the key off the resource's own output, NOT the listRedisKeys invoke — the
-  // invoke runs eagerly at preview time and 404s before the cache exists. The resource
-  // output is "unknown" during preview, so the apply is skipped instead.
-  const primaryKey = cache.accessKeys.apply((keys) => keys.primaryKey);
+  // Gate the listDatabaseKeys invoke on database.id, which is UNKNOWN during preview for a
+  // to-be-created resource — so the apply is skipped at preview instead of calling Azure
+  // (which would 404 before the database exists).
+  const primaryKey = pulumi
+    .all([database.id, resourceGroupName, cluster.name])
+    .apply(([, rgName, clusterName]) =>
+      azurenative.cache.listDatabaseKeys({
+        resourceGroupName: rgName,
+        clusterName,
+        databaseName: "default",
+      })
+    )
+    .apply((keys) => keys.primaryKey!);
 
   return {
-    cache,
-    hostName: cache.hostName,
-    sslPort: cache.sslPort.apply((p) => p ?? 6380),
+    cluster,
+    database,
+    hostName: cluster.hostName,
+    port: database.port.apply((p) => p ?? 10000),
     primaryKey,
     vnetId: vnet.id,
   };

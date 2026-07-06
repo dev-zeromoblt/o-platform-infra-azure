@@ -188,9 +188,9 @@ export const outputs = {
     acrUsername: acr.username,
     acrPassword: pulumi.secret(acr.password),
 
-    // Redis (mobility service cache, private)
+    // Redis (Azure Managed Redis, mobility service cache, private)
     redisHostName: redis.hostName,
-    redisSslPort: redis.sslPort,
+    redisPort: redis.port,
     redisPrimaryKey: pulumi.secret(redis.primaryKey),
     redisVnetId: redis.vnetId,
 
@@ -215,6 +215,6 @@ export const acrLoginServer = outputs.acrLoginServer;
 export const acrUsername = outputs.acrUsername;
 export const acrPassword = outputs.acrPassword;
 export const redisHostName = outputs.redisHostName;
-export const redisSslPort = outputs.redisSslPort;
+export const redisPort = outputs.redisPort;
 export const redisPrimaryKey = outputs.redisPrimaryKey;
 export const redisVnetId = outputs.redisVnetId;
