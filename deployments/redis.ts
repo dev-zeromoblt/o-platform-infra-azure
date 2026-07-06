@@ -1,5 +1,8 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as azurenative from "@pulumi/azure-native";
+// Pin the cache resources to the 2025-04-01 API: the default RedisEnterprise apiVersion
+// (2023-03-01-preview) predates the Azure Managed Redis "Balanced_*" SKUs and rejects them.
+import * as cache from "@pulumi/azure-native/cache/v20250401";
 
 export interface RedisConfig {
   resourceGroupName: pulumi.Input<string>;
@@ -16,8 +19,8 @@ export interface RedisConfig {
 }
 
 export interface RedisOutputs {
-  cluster: azurenative.cache.RedisEnterprise;
-  database: azurenative.cache.Database;
+  cluster: cache.RedisEnterprise;
+  database: cache.Database;
   hostName: pulumi.Output<string>;
   port: pulumi.Output<number>;
   primaryKey: pulumi.Output<string>;
@@ -60,7 +63,7 @@ export function createRedis(config: RedisConfig): RedisOutputs {
   });
 
   // ── The cache: Azure Managed Redis (RedisEnterprise cluster + default database) ──
-  const cluster = new azurenative.cache.RedisEnterprise(`redis-${environment}`, {
+  const cluster = new cache.RedisEnterprise(`redis-${environment}`, {
     clusterName: `${environment}-mobility-redis`,
     resourceGroupName,
     location,
@@ -69,7 +72,7 @@ export function createRedis(config: RedisConfig): RedisOutputs {
     tags: { environment, managedBy: "pulumi", purpose: "mobility-cache" },
   });
 
-  const database = new azurenative.cache.Database(`redis-db-${environment}`, {
+  const database = new cache.Database(`redis-db-${environment}`, {
     databaseName: "default", // AMR requires the database be named "default"
     clusterName: cluster.name,
     resourceGroupName,
@@ -144,7 +147,7 @@ export function createRedis(config: RedisConfig): RedisOutputs {
   const primaryKey = pulumi
     .all([database.id, resourceGroupName, cluster.name])
     .apply(([, rgName, clusterName]) =>
-      azurenative.cache.listDatabaseKeys({
+      cache.listDatabaseKeys({
         resourceGroupName: rgName,
         clusterName,
         databaseName: "default",
