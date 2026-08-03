@@ -7,6 +7,9 @@ import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
 import { createAcr } from "./deployments/acr";
 import { patchKarpenterNodePools } from "./deployments/karpenter-patches";
+import { createHedgeDocDatabase } from "./deployments/hedgedoc-database";
+import { createHedgeDoc } from "./deployments/hedgedoc";
+import { createHedgeDocIngress } from "./deployments/hedgedoc-ingress";
 
 // Get configuration
 const config = new pulumi.Config();
@@ -149,6 +152,88 @@ const karpenterPatches = patchKarpenterNodePools({
     environment,
 });
 
+// ---------------------------------------------------------------------------
+// HedgeDoc (BALL-46) — internal collaborative markdown notes.
+// Opt-in per stack so enabling it on dev does not implicitly touch beta/prod.
+// ---------------------------------------------------------------------------
+const hedgedocEnabled = config.getBoolean("hedgedocEnabled") || false;
+
+let hedgedocUrl: pulumi.Output<string> | string | undefined;
+let hedgedocDbFqdn: pulumi.Output<string> | undefined;
+let hedgedocNamespace: pulumi.Output<string> | undefined;
+
+if (hedgedocEnabled) {
+    const hedgedocDomain = config.require("hedgedocDomain");
+    if (!hedgedocDomain.endsWith(`.${domain}`)) {
+        throw new Error(
+            `hedgedocDomain (${hedgedocDomain}) must be a subdomain of the stack domain (${domain})`
+        );
+    }
+    // "docs.dev.az.zeromoblt.com" within zone "dev.az.zeromoblt.com" -> record "docs"
+    const hedgedocRecordName = hedgedocDomain.slice(0, -(domain.length + 1));
+
+    // The cluster egresses through a managed NAT gateway, so this is a single
+    // stable address. Find it with:
+    //   az network public-ip list -g <node-rg> --query "[].ipAddress"
+    // A private endpoint is not an option here — see deployments/hedgedoc-database.ts.
+    const hedgedocEgressIps = config.requireObject<string[]>("hedgedocAllowedEgressIps");
+
+    const hedgedocDb = createHedgeDocDatabase({
+        environment,
+        location,
+        allowedEgressIps: hedgedocEgressIps,
+        administratorLogin: config.get("hedgedocDbAdminUser") || "hedgedocadmin",
+        administratorPassword: config.requireSecret("hedgedocDbAdminPassword"),
+        databaseName: config.get("hedgedocDbName") || "hedgedoc",
+        postgresVersion: config.get("hedgedocPgVersion") || "16",
+        skuName: config.get("hedgedocPgSku") || "Standard_B2s",
+        skuTier: config.get("hedgedocPgTier") || "Burstable",
+        storageSizeGB: config.getNumber("hedgedocPgStorageGB") || 32,
+        backupRetentionDays: config.getNumber("hedgedocPgBackupDays") || 14,
+        highAvailability: config.getBoolean("hedgedocPgHighAvailability") || false,
+    });
+
+    const hedgedoc = createHedgeDoc({
+        provider: k8sProvider,
+        environment,
+        domain: hedgedocDomain,
+        image: config.get("hedgedocImage") || "quay.io/hedgedoc/hedgedoc:1.11.1",
+        dbConnectionString: hedgedocDb.connectionString,
+        sessionSecret: config.requireSecret("hedgedocSessionSecret"),
+        googleClientId: config.getSecret("hedgedocGoogleClientId"),
+        googleClientSecret: config.getSecret("hedgedocGoogleClientSecret"),
+        googleHostedDomain: config.get("hedgedocGoogleHostedDomain") || "zeromoblt.com",
+        uploadsStorageSize: config.get("hedgedocUploadsSize") || "20Gi",
+        uploadsStorageClass: config.get("hedgedocUploadsStorageClass") || "managed-csi",
+        cpuRequest: config.get("hedgedocCpuRequest") || "500m",
+        cpuLimit: config.get("hedgedocCpuLimit") || "2",
+        memoryRequest: config.get("hedgedocMemoryRequest") || "768Mi",
+        memoryLimit: config.get("hedgedocMemoryLimit") || "2Gi",
+        // The pod cannot connect until the database exists and the firewall admits
+        // the cluster's egress address.
+        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules],
+    });
+
+    const hedgedocIngress = createHedgeDocIngress({
+        provider: k8sProvider,
+        environment,
+        domain: hedgedocDomain,
+        recordName: hedgedocRecordName,
+        namespace: hedgedoc.namespaceName,
+        serviceName: hedgedoc.serviceName,
+        servicePort: hedgedoc.servicePort,
+        ingressIP: ingressIP,
+        dnsZoneName: dnsZone.name,
+        dnsResourceGroupName: dnsResourceGroup.name,
+        clusterIssuer: "letsencrypt-prod",
+        dependsOn: [certManagerRelease, hedgedoc.service],
+    });
+
+    hedgedocUrl = hedgedocIngress.url;
+    hedgedocDbFqdn = hedgedocDb.fqdn;
+    hedgedocNamespace = hedgedoc.namespaceName;
+}
+
 // Export stack outputs
 export const outputs = {
     // Cluster information
@@ -177,6 +262,11 @@ export const outputs = {
     acrUsername: acr.username,
     acrPassword: pulumi.secret(acr.password),
 
+    // HedgeDoc (undefined when hedgedocEnabled is false)
+    hedgedocUrl: hedgedocUrl,
+    hedgedocDbFqdn: hedgedocDbFqdn,
+    hedgedocNamespace: hedgedocNamespace,
+
     // Environment
     environment: environment,
     location: location,
@@ -197,3 +287,6 @@ export const certManagerEmail = outputs.certManagerEmail;
 export const acrLoginServer = outputs.acrLoginServer;
 export const acrUsername = outputs.acrUsername;
 export const acrPassword = outputs.acrPassword;
+export const hedgedocSiteUrl = outputs.hedgedocUrl;
+export const hedgedocDatabaseFqdn = outputs.hedgedocDbFqdn;
+export const hedgedocK8sNamespace = outputs.hedgedocNamespace;
