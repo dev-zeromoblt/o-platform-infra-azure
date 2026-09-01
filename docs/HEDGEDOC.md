@@ -91,6 +91,28 @@ kubectl --context aks-dev1050f8e6 run egresscheck --rm -i --restart=Never \
 If the cluster is ever rebuilt with a bring-your-own VNet, switch this back to a
 private endpoint — the deny assignment only covers the AKS-managed VNet.
 
+### Database roles — the app is not the server admin
+
+HedgeDoc connects as `hedgedoc_app`, a role that owns only the `hedgedoc`
+database. The Flexible Server administrator credentials never reach the
+application pod; they go only to the `hedgedoc-db-bootstrap` Job.
+
+This matters more than usual here, because the firewall admits the shared
+cluster NAT address — so any pod in any namespace can already open a socket to
+5432. Had the app carried admin credentials, an RCE or a `kubectl exec` would
+have yielded admin over every database on the server rather than just this one.
+
+The role is created by a Kubernetes Job rather than a Pulumi Postgres provider
+because the server is only reachable from inside the cluster — Pulumi running on
+a laptop or in CI cannot connect to it. The Job's SQL is idempotent and re-runs
+on every deploy; its name carries a hash of the app credentials, so rotating the
+password creates a new Job that re-applies it. It also adopts any objects left
+owned by the admin from an earlier deployment, so sequelize migrations keep
+working across the switch.
+
+Ordering is namespace → bootstrap Job → Deployment. The app cannot authenticate
+before the role exists, so that sequence is enforced with `dependsOn`.
+
 ### Postgres TLS
 
 Azure enforces TLS. HedgeDoc builds Sequelize as `new Sequelize(dbURL, dbConfig)`,
@@ -124,9 +146,12 @@ implicitly change `beta`/`prod`.
 | `hedgedocDomain` | — | Must be a subdomain of the stack `domain` |
 | `hedgedocAllowedEgressIps` | — | List; the cluster's NAT gateway IP(s). Empty is rejected |
 | `hedgedocImage` | `quay.io/hedgedoc/hedgedoc:1.11.1` | Never use `:latest` |
-| `hedgedocDbAdminUser` | `hedgedocadmin` | |
+| `hedgedocDbAdminUser` | `hedgedocadmin` | Server admin; used **only** by the bootstrap Job |
 | `hedgedocDbAdminPassword` | — | **secret**, keep URL-safe (alphanumeric) |
+| `hedgedocDbAppUser` | `hedgedoc_app` | Least-privilege role the app connects as |
+| `hedgedocDbAppPassword` | — | **secret**, keep URL-safe (alphanumeric) |
 | `hedgedocDbName` | `hedgedoc` | |
+| `hedgedocPsqlImage` | `postgres:16-alpine` | Client image for the bootstrap Job |
 | `hedgedocPgVersion` | `16` | |
 | `hedgedocPgSku` / `hedgedocPgTier` | `Standard_B2s` / `Burstable` | Use `GP_Standard_D2s_v3` / `GeneralPurpose` for prod |
 | `hedgedocPgStorageGB` | `32` | auto-grow enabled |
@@ -176,6 +201,9 @@ pulumi up --stack dev \
   --target 'urn:pulumi:dev::o-platform-infra-azure::azure-native:dbforpostgresql/v20240801:FirewallRule::hedgedoc-pg-fw-dev-0' \
   --target 'urn:pulumi:dev::o-platform-infra-azure::azure-native:network:RecordSet::hedgedoc-dns-dev' \
   --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:Namespace::hedgedoc-ns-dev' \
+  --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:ConfigMap::hedgedoc-db-bootstrap-sql-dev' \
+  --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:Secret::hedgedoc-db-bootstrap-secret-dev' \
+  --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:batch/v1:Job::hedgedoc-db-bootstrap-dev' \
   --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:ConfigMap::hedgedoc-config-dev' \
   --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:PersistentVolumeClaim::hedgedoc-uploads-dev' \
   --target 'urn:pulumi:dev::o-platform-infra-azure::kubernetes:core/v1:Secret::hedgedoc-secret-dev' \
@@ -226,8 +254,9 @@ with the password. Use a throwaway pod on the cluster:
 ```bash
 kubectl --context aks-dev1050f8e6 -n hedgedoc-dev run psql --rm -it --restart=Never \
   --image=postgres:16-alpine \
-  --env="PGPASSWORD=$(pulumi config get hedgedocDbAdminPassword --stack dev)" \
-  -- psql -h psql-hedgedoc-dev.postgres.database.azure.com -U hedgedocadmin -d hedgedoc
+  --env="PGPASSWORD=$(pulumi config get hedgedocDbAppPassword --stack dev)" \
+  -- psql "sslmode=require" -h psql-hedgedoc-dev.postgres.database.azure.com \
+       -U hedgedoc_app -d hedgedoc
 ```
 
 ### Backups

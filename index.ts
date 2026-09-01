@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as azurenative from "@pulumi/azure-native";
+import * as k8s from "@pulumi/kubernetes";
 import { createAksCluster } from "./deployments/cluster";
 import { createDnsZone, createDnsARecord } from "./deployments/dns-zones";
 import { getIngressController } from "./deployments/ingress-controller";
@@ -9,6 +10,7 @@ import { createAcr } from "./deployments/acr";
 import { patchKarpenterNodePools } from "./deployments/karpenter-patches";
 import { createHedgeDocDatabase } from "./deployments/hedgedoc-database";
 import { createHedgeDoc } from "./deployments/hedgedoc";
+import { createHedgeDocDbBootstrap } from "./deployments/hedgedoc-db-bootstrap";
 import { createHedgeDocIngress } from "./deployments/hedgedoc-ingress";
 
 // Get configuration
@@ -178,13 +180,23 @@ if (hedgedocEnabled) {
     // A private endpoint is not an option here — see deployments/hedgedoc-database.ts.
     const hedgedocEgressIps = config.requireObject<string[]>("hedgedocAllowedEgressIps");
 
+    // The application never holds the server administrator credentials; those go
+    // only to the bootstrap Job that provisions the least-privilege role.
+    const hedgedocDbAdminUser = config.get("hedgedocDbAdminUser") || "hedgedocadmin";
+    const hedgedocDbAdminPassword = config.requireSecret("hedgedocDbAdminPassword");
+    const hedgedocDbAppUser = config.get("hedgedocDbAppUser") || "hedgedoc_app";
+    const hedgedocDbAppPassword = config.requireSecret("hedgedocDbAppPassword");
+    const hedgedocDbName = config.get("hedgedocDbName") || "hedgedoc";
+
     const hedgedocDb = createHedgeDocDatabase({
         environment,
         location,
         allowedEgressIps: hedgedocEgressIps,
-        administratorLogin: config.get("hedgedocDbAdminUser") || "hedgedocadmin",
-        administratorPassword: config.requireSecret("hedgedocDbAdminPassword"),
-        databaseName: config.get("hedgedocDbName") || "hedgedoc",
+        administratorLogin: hedgedocDbAdminUser,
+        administratorPassword: hedgedocDbAdminPassword,
+        appUser: hedgedocDbAppUser,
+        appPassword: hedgedocDbAppPassword,
+        databaseName: hedgedocDbName,
         postgresVersion: config.get("hedgedocPgVersion") || "16",
         skuName: config.get("hedgedocPgSku") || "Standard_B2s",
         skuTier: config.get("hedgedocPgTier") || "Burstable",
@@ -193,11 +205,39 @@ if (hedgedocEnabled) {
         highAvailability: config.getBoolean("hedgedocPgHighAvailability") || false,
     });
 
+    const hedgedocLabels = { app: "hedgedoc", environment };
+
+    const hedgedocNs = new k8s.core.v1.Namespace(`hedgedoc-ns-${environment}`, {
+        metadata: { name: `hedgedoc-${environment}`, labels: hedgedocLabels },
+    }, { provider: k8sProvider });
+
+    // Provisions the least-privilege role the app connects as, before the app
+    // starts. Runs in-cluster because the server only admits the cluster's egress
+    // address, so Pulumi cannot reach it from a laptop or from CI.
+    const hedgedocDbBootstrap = createHedgeDocDbBootstrap({
+        provider: k8sProvider,
+        environment,
+        namespace: hedgedocNs.metadata.name,
+        labels: hedgedocLabels,
+        host: hedgedocDb.fqdn,
+        databaseName: hedgedocDbName,
+        adminUser: hedgedocDbAdminUser,
+        adminPassword: hedgedocDbAdminPassword,
+        appUser: hedgedocDbAppUser,
+        appPassword: hedgedocDbAppPassword,
+        image: config.get("hedgedocPsqlImage") || "postgres:16-alpine",
+        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules, hedgedocNs],
+    });
+
     const hedgedoc = createHedgeDoc({
+        namespace: hedgedocNs,
         provider: k8sProvider,
         environment,
         domain: hedgedocDomain,
-        image: config.get("hedgedocImage") || "quay.io/hedgedoc/hedgedoc:1.11.1",
+        image: config.get("hedgedocImage") ||
+            // Pinned by digest so the tag cannot be re-pointed under us. This is
+            // the multi-arch index digest, so arm64 nodes still resolve correctly.
+            "quay.io/hedgedoc/hedgedoc:1.11.1@sha256:7b3f79667ad58c6419758547f10940638bcdc85ebee2a4e650318a704095975b",
         dbConnectionString: hedgedocDb.connectionString,
         sessionSecret: config.requireSecret("hedgedocSessionSecret"),
         googleClientId: config.getSecret("hedgedocGoogleClientId"),
@@ -209,9 +249,9 @@ if (hedgedocEnabled) {
         cpuLimit: config.get("hedgedocCpuLimit") || "2",
         memoryRequest: config.get("hedgedocMemoryRequest") || "768Mi",
         memoryLimit: config.get("hedgedocMemoryLimit") || "2Gi",
-        // The pod cannot connect until the database exists and the firewall admits
-        // the cluster's egress address.
-        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules],
+        // The app role does not exist until the bootstrap Job has run, so the
+        // pod cannot authenticate before then.
+        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules, hedgedocDbBootstrap.job],
     });
 
     const hedgedocIngress = createHedgeDocIngress({

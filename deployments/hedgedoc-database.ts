@@ -30,6 +30,9 @@ export interface HedgeDocDatabaseConfig {
     allowedEgressIps: string[];
     administratorLogin: string;
     administratorPassword: pulumi.Input<string>;
+    /** Least-privilege role the application connects as; owns only its own database. */
+    appUser: string;
+    appPassword: pulumi.Input<string>;
     databaseName: string;
     postgresVersion: string;
     skuName: string;
@@ -40,13 +43,31 @@ export interface HedgeDocDatabaseConfig {
     highAvailability: boolean;
 }
 
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+/** Addresses that would widen the firewall past "the cluster's egress IP". */
+const FORBIDDEN_EGRESS_IPS = new Set(["0.0.0.0", "255.255.255.255"]);
+
 export function createHedgeDocDatabase(config: HedgeDocDatabaseConfig) {
     const env = config.environment;
 
+    // Validated here rather than only in a test: these values come from stack
+    // config, so a test that greps this source file would never see a bad one.
     if (config.allowedEgressIps.length === 0) {
         throw new Error(
             "hedgedoc: allowedEgressIps must not be empty — the server would be unreachable from the cluster"
         );
+    }
+    for (const ip of config.allowedEgressIps) {
+        if (!IPV4.test(ip)) {
+            throw new Error(`hedgedoc: allowedEgressIps entry "${ip}" is not a plain IPv4 address`);
+        }
+        if (FORBIDDEN_EGRESS_IPS.has(ip)) {
+            // 0.0.0.0 is how Azure spells "any Azure service", and a firewall rule
+            // spanning it exposes the database far beyond this cluster.
+            throw new Error(
+                `hedgedoc: allowedEgressIps entry "${ip}" would open the database beyond the cluster egress address`
+            );
+        }
     }
 
     const resourceGroup = new azurenative.resources.ResourceGroup(`hedgedoc-rg-${env}`, {
@@ -141,11 +162,15 @@ export function createHedgeDocDatabase(config: HedgeDocDatabaseConfig) {
 
     const fqdn = pulumi.interpolate`${serverName}.postgres.database.azure.com`;
 
+    // The application connects as the least-privilege role, never as the server
+    // administrator — see deployments/hedgedoc-db-bootstrap.ts for how that role
+    // is created and given ownership of this database.
+    //
     // TLS options are supplied through HedgeDoc's config.json rather than an
     // sslmode= query parameter — Sequelize does not reliably map connection-string
     // query parameters onto the pg driver.
     const connectionString = pulumi.secret(
-        pulumi.interpolate`postgres://${config.administratorLogin}:${config.administratorPassword}@${fqdn}:5432/${config.databaseName}`
+        pulumi.interpolate`postgres://${config.appUser}:${config.appPassword}@${fqdn}:5432/${config.databaseName}`
     );
 
     return {

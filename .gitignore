@@ -30,3 +30,4 @@ kubeconfig*.yaml
 Thumbs.db
 .omc
 coverage
+test-results

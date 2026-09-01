@@ -15,6 +15,11 @@ import * as crypto from "crypto";
 export interface HedgeDocConfig {
     provider: k8s.Provider;
     environment: string;
+    /**
+     * Created by the caller so the database bootstrap Job can be sequenced
+     * between the namespace and this Deployment.
+     */
+    namespace: k8s.core.v1.Namespace;
     /** Public hostname, e.g. docs.dev.az.zeromoblt.com */
     domain: string;
     image: string;
@@ -43,19 +48,13 @@ const CONTAINER_PORT = 3000;
 
 export function createHedgeDoc(config: HedgeDocConfig) {
     const env = config.environment;
-    const namespaceName = `hedgedoc-${env}`;
     const labels = {
         app: "hedgedoc",
         environment: env,
     };
     const opts = { provider: config.provider, dependsOn: config.dependsOn || [] };
 
-    const namespace = new k8s.core.v1.Namespace(`hedgedoc-ns-${env}`, {
-        metadata: {
-            name: namespaceName,
-            labels: labels,
-        },
-    }, opts);
+    const namespace = config.namespace;
 
     const secret = new k8s.core.v1.Secret(`hedgedoc-secret-${env}`, {
         metadata: {
@@ -181,6 +180,25 @@ export function createHedgeDoc(config: HedgeDocConfig) {
                     },
                 },
                 spec: {
+                    // The default Karpenter NodePool offers spot alongside
+                    // on-demand (see karpenter-patches.ts). A spot reclaim is an
+                    // involuntary eviction, so a PodDisruptionBudget cannot
+                    // prevent it — and because this single replica holds every
+                    // active editing session in memory, losing it drops live
+                    // collaborative state. Pin to on-demand instead.
+                    affinity: {
+                        nodeAffinity: {
+                            requiredDuringSchedulingIgnoredDuringExecution: {
+                                nodeSelectorTerms: [{
+                                    matchExpressions: [{
+                                        key: "karpenter.sh/capacity-type",
+                                        operator: "In",
+                                        values: ["on-demand"],
+                                    }],
+                                }],
+                            },
+                        },
+                    },
                     securityContext: {
                         runAsUser: HEDGEDOC_UID,
                         runAsGroup: HEDGEDOC_UID,
