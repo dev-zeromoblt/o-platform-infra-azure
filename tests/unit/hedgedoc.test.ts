@@ -37,7 +37,7 @@ const DB_ARGS = {
   appPassword: pulumi.secret("app-pw"),
   databaseName: "hedgedoc",
   postgresVersion: "16",
-  skuName: "Standard_B2s",
+  skuName: "Standard_B1ms",
   skuTier: "Burstable",
   storageSizeGB: 32,
   backupRetentionDays: 14,

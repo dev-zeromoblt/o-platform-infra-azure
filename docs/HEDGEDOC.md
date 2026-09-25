@@ -153,7 +153,7 @@ implicitly change `beta`/`prod`.
 | `hedgedocDbName` | `hedgedoc` | |
 | `hedgedocPsqlImage` | `postgres:16-alpine` | Client image for the bootstrap Job |
 | `hedgedocPgVersion` | `16` | |
-| `hedgedocPgSku` / `hedgedocPgTier` | `Standard_B2s` / `Burstable` | Use `GP_Standard_D2s_v3` / `GeneralPurpose` for prod |
+| `hedgedocPgSku` / `hedgedocPgTier` | `Standard_B1ms` / `Burstable` | Cheapest option; use `GP_Standard_D2s_v3` / `GeneralPurpose` for prod |
 | `hedgedocPgStorageGB` | `32` | auto-grow enabled |
 | `hedgedocPgBackupDays` | `14` | |
 | `hedgedocPgHighAvailability` | `false` | Zone-redundant HA; enable for prod |

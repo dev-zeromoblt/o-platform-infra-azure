@@ -198,7 +198,10 @@ if (hedgedocEnabled) {
         appPassword: hedgedocDbAppPassword,
         databaseName: hedgedocDbName,
         postgresVersion: config.get("hedgedocPgVersion") || "16",
-        skuName: config.get("hedgedocPgSku") || "Standard_B2s",
+        // B1ms (1 vCore / 2 GiB) is ample for ~40-50 users: live editing state stays in
+        // HedgeDoc's memory, so Postgres only sees note saves. It is roughly a quarter
+        // of the B2s list price. Override for prod (see docs/HEDGEDOC.md).
+        skuName: config.get("hedgedocPgSku") || "Standard_B1ms",
         skuTier: config.get("hedgedocPgTier") || "Burstable",
         storageSizeGB: config.getNumber("hedgedocPgStorageGB") || 32,
         backupRetentionDays: config.getNumber("hedgedocPgBackupDays") || 14,
