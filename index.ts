@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as azurenative from "@pulumi/azure-native";
+import * as k8s from "@pulumi/kubernetes";
 import { createAksCluster } from "./deployments/cluster";
 import { createDnsZone, createDnsARecord } from "./deployments/dns-zones";
 import { getIngressController } from "./deployments/ingress-controller";
@@ -7,6 +8,10 @@ import { installCertManager } from "./deployments/cert-manager";
 import { createDnsDelegation } from "./deployments/dns-delegation";
 import { createAcr } from "./deployments/acr";
 import { patchKarpenterNodePools } from "./deployments/karpenter-patches";
+import { createHedgeDocDatabase } from "./deployments/hedgedoc-database";
+import { createHedgeDoc } from "./deployments/hedgedoc";
+import { createHedgeDocDbBootstrap } from "./deployments/hedgedoc-db-bootstrap";
+import { createHedgeDocIngress } from "./deployments/hedgedoc-ingress";
 
 // Get configuration
 const config = new pulumi.Config();
@@ -149,6 +154,129 @@ const karpenterPatches = patchKarpenterNodePools({
     environment,
 });
 
+// ---------------------------------------------------------------------------
+// HedgeDoc (BALL-46) — internal collaborative markdown notes.
+// Opt-in per stack so enabling it on dev does not implicitly touch beta/prod.
+// ---------------------------------------------------------------------------
+const hedgedocEnabled = config.getBoolean("hedgedocEnabled") || false;
+
+let hedgedocUrl: pulumi.Output<string> | string | undefined;
+let hedgedocDbFqdn: pulumi.Output<string> | undefined;
+let hedgedocNamespace: pulumi.Output<string> | undefined;
+
+if (hedgedocEnabled) {
+    const hedgedocDomain = config.require("hedgedocDomain");
+    if (!hedgedocDomain.endsWith(`.${domain}`)) {
+        throw new Error(
+            `hedgedocDomain (${hedgedocDomain}) must be a subdomain of the stack domain (${domain})`
+        );
+    }
+    // "docs.dev.az.zeromoblt.com" within zone "dev.az.zeromoblt.com" -> record "docs"
+    const hedgedocRecordName = hedgedocDomain.slice(0, -(domain.length + 1));
+
+    // The cluster egresses through a managed NAT gateway, so this is a single
+    // stable address. Find it with:
+    //   az network public-ip list -g <node-rg> --query "[].ipAddress"
+    // A private endpoint is not an option here — see deployments/hedgedoc-database.ts.
+    const hedgedocEgressIps = config.requireObject<string[]>("hedgedocAllowedEgressIps");
+
+    // The application never holds the server administrator credentials; those go
+    // only to the bootstrap Job that provisions the least-privilege role.
+    const hedgedocDbAdminUser = config.get("hedgedocDbAdminUser") || "hedgedocadmin";
+    const hedgedocDbAdminPassword = config.requireSecret("hedgedocDbAdminPassword");
+    const hedgedocDbAppUser = config.get("hedgedocDbAppUser") || "hedgedoc_app";
+    const hedgedocDbAppPassword = config.requireSecret("hedgedocDbAppPassword");
+    const hedgedocDbName = config.get("hedgedocDbName") || "hedgedoc";
+
+    const hedgedocDb = createHedgeDocDatabase({
+        environment,
+        location,
+        allowedEgressIps: hedgedocEgressIps,
+        administratorLogin: hedgedocDbAdminUser,
+        administratorPassword: hedgedocDbAdminPassword,
+        appUser: hedgedocDbAppUser,
+        appPassword: hedgedocDbAppPassword,
+        databaseName: hedgedocDbName,
+        postgresVersion: config.get("hedgedocPgVersion") || "16",
+        // B1ms (1 vCore / 2 GiB) is ample for ~40-50 users: live editing state stays in
+        // HedgeDoc's memory, so Postgres only sees note saves. It is roughly a quarter
+        // of the B2s list price. Override for prod (see docs/HEDGEDOC.md).
+        skuName: config.get("hedgedocPgSku") || "Standard_B1ms",
+        skuTier: config.get("hedgedocPgTier") || "Burstable",
+        storageSizeGB: config.getNumber("hedgedocPgStorageGB") || 32,
+        backupRetentionDays: config.getNumber("hedgedocPgBackupDays") || 14,
+        highAvailability: config.getBoolean("hedgedocPgHighAvailability") || false,
+    });
+
+    const hedgedocLabels = { app: "hedgedoc", environment };
+
+    const hedgedocNs = new k8s.core.v1.Namespace(`hedgedoc-ns-${environment}`, {
+        metadata: { name: `hedgedoc-${environment}`, labels: hedgedocLabels },
+    }, { provider: k8sProvider });
+
+    // Provisions the least-privilege role the app connects as, before the app
+    // starts. Runs in-cluster because the server only admits the cluster's egress
+    // address, so Pulumi cannot reach it from a laptop or from CI.
+    const hedgedocDbBootstrap = createHedgeDocDbBootstrap({
+        provider: k8sProvider,
+        environment,
+        namespace: hedgedocNs.metadata.name,
+        labels: hedgedocLabels,
+        host: hedgedocDb.fqdn,
+        databaseName: hedgedocDbName,
+        adminUser: hedgedocDbAdminUser,
+        adminPassword: hedgedocDbAdminPassword,
+        appUser: hedgedocDbAppUser,
+        appPassword: hedgedocDbAppPassword,
+        image: config.get("hedgedocPsqlImage") || "postgres:16-alpine",
+        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules, hedgedocNs],
+    });
+
+    const hedgedoc = createHedgeDoc({
+        namespace: hedgedocNs,
+        provider: k8sProvider,
+        environment,
+        domain: hedgedocDomain,
+        image: config.get("hedgedocImage") ||
+            // Pinned by digest so the tag cannot be re-pointed under us. This is
+            // the multi-arch index digest, so arm64 nodes still resolve correctly.
+            "quay.io/hedgedoc/hedgedoc:1.11.1@sha256:7b3f79667ad58c6419758547f10940638bcdc85ebee2a4e650318a704095975b",
+        dbConnectionString: hedgedocDb.connectionString,
+        sessionSecret: config.requireSecret("hedgedocSessionSecret"),
+        googleClientId: config.getSecret("hedgedocGoogleClientId"),
+        googleClientSecret: config.getSecret("hedgedocGoogleClientSecret"),
+        googleHostedDomain: config.get("hedgedocGoogleHostedDomain") || "zeromoblt.com",
+        uploadsStorageSize: config.get("hedgedocUploadsSize") || "20Gi",
+        uploadsStorageClass: config.get("hedgedocUploadsStorageClass") || "managed-csi",
+        cpuRequest: config.get("hedgedocCpuRequest") || "500m",
+        cpuLimit: config.get("hedgedocCpuLimit") || "2",
+        memoryRequest: config.get("hedgedocMemoryRequest") || "768Mi",
+        memoryLimit: config.get("hedgedocMemoryLimit") || "2Gi",
+        // The app role does not exist until the bootstrap Job has run, so the
+        // pod cannot authenticate before then.
+        dependsOn: [hedgedocDb.database, ...hedgedocDb.firewallRules, hedgedocDbBootstrap.job],
+    });
+
+    const hedgedocIngress = createHedgeDocIngress({
+        provider: k8sProvider,
+        environment,
+        domain: hedgedocDomain,
+        recordName: hedgedocRecordName,
+        namespace: hedgedoc.namespaceName,
+        serviceName: hedgedoc.serviceName,
+        servicePort: hedgedoc.servicePort,
+        ingressIP: ingressIP,
+        dnsZoneName: dnsZone.name,
+        dnsResourceGroupName: dnsResourceGroup.name,
+        clusterIssuer: "letsencrypt-prod",
+        dependsOn: [certManagerRelease, hedgedoc.service],
+    });
+
+    hedgedocUrl = hedgedocIngress.url;
+    hedgedocDbFqdn = hedgedocDb.fqdn;
+    hedgedocNamespace = hedgedoc.namespaceName;
+}
+
 // Export stack outputs
 export const outputs = {
     // Cluster information
@@ -177,6 +305,11 @@ export const outputs = {
     acrUsername: acr.username,
     acrPassword: pulumi.secret(acr.password),
 
+    // HedgeDoc (undefined when hedgedocEnabled is false)
+    hedgedocUrl: hedgedocUrl,
+    hedgedocDbFqdn: hedgedocDbFqdn,
+    hedgedocNamespace: hedgedocNamespace,
+
     // Environment
     environment: environment,
     location: location,
@@ -197,3 +330,6 @@ export const certManagerEmail = outputs.certManagerEmail;
 export const acrLoginServer = outputs.acrLoginServer;
 export const acrUsername = outputs.acrUsername;
 export const acrPassword = outputs.acrPassword;
+export const hedgedocSiteUrl = outputs.hedgedocUrl;
+export const hedgedocDatabaseFqdn = outputs.hedgedocDbFqdn;
+export const hedgedocK8sNamespace = outputs.hedgedocNamespace;

@@ -13,3 +13,18 @@ config:
   # Set admin user object ID with: pulumi config set adminUserObjectId "$(az ad signed-in-user show --query id -o tsv)"
   # This user will be granted "Azure Kubernetes Service RBAC Cluster Admin" role automatically
   o-platform-infra-azure:adminUserObjectId: 1610c587-f138-4532-a530-6dcf885513c7
+  o-platform-infra-azure:hedgedocEnabled: "true"
+  o-platform-infra-azure:hedgedocDomain: docs.dev.az.zeromoblt.com
+  o-platform-infra-azure:hedgedocGoogleHostedDomain: zeromoblt.com
+  o-platform-infra-azure:hedgedocDbAdminPassword:
+    secure: AAABAKEyE2E0VmFvmbHac0+jRh6lPHD/uYcIrmYVGudbPeVT9fvHfg6C8BppPnX9YThzTVCIh452k9pJRSPx8daqRYja
+  o-platform-infra-azure:hedgedocSessionSecret:
+    secure: AAABAPW+8Lwq6ouzlq5+LZiibWDiHjS7RB045pgfDiRv/QtAAKvdKjFcJyB1+nIWeMnkF27krXt937GbMmmE9Nk28WSkrC3KFOnEIdqDnGIEzS6FXvfsT0KjdF09Cl0d
+  o-platform-infra-azure:hedgedocAllowedEgressIps:
+    - 104.211.98.71
+  o-platform-infra-azure:hedgedocGoogleClientId:
+    secure: AAABAKq+8cnXj5XMVevxg09Enw961X4yZHipw5PMaI7/2Cuq7FUjD0Se62qj6aIG/JqI7U7x26gCEAD9wAnV5VL0LBhIFx4oTYKHRyw1T5bBajw9v/oBGuNpXwsf0ok8a0XLAT5UtO4=
+  o-platform-infra-azure:hedgedocGoogleClientSecret:
+    secure: AAABAEgfTe4t7tU+qSoue4ZvMBeAlDT8k17YJinKNl294vOuFcsrchhBEfZI0dWKnb+YeZQKeBIQsFcTLBAgRdAAyA==
+  o-platform-infra-azure:hedgedocDbAppPassword:
+    secure: AAABACaTbKHfmNPWdigMbxyC1pT4/VrNemvPwtAtvyhPYNk+ZnjGe2qzFfqxqWQb44k5OEyR2ouNFjjHU1e4jzIpDjNm
