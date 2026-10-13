@@ -22,6 +22,13 @@ const domain = config.require("domain");
 const location = azureConfig.require("location");
 const certEmail = config.get("certManagerEmail") || `admin@${domain}`;
 const adminUserObjectId = config.get("adminUserObjectId"); // Optional: User/SP object ID for Azure RBAC
+// Paused: remove the AKS cluster and everything in it (control plane, VMSS nodes, NAT gateway,
+// load balancer, PVC disks) while keeping the resource group, ACR and DNS zone, so the zone's
+// name servers (delegated from prod) stay the same. Set back to false and `pulumi up` to resume.
+const paused = config.getBoolean("paused") ?? false;
+if (paused && environment === "prod") {
+    throw new Error("paused=true is not allowed for prod");
+}
 
 // Create main resource group for AKS
 const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-aks-rg`, {
@@ -40,26 +47,6 @@ const acr = createAcr({
     location,
 });
 
-// Create AKS Automatic cluster
-const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn, roleAssignment } = createAksCluster({
-    resourceGroupName: resourceGroup.name,
-    environment,
-    kubernetesVersion,
-    systemPoolVmSize,
-    systemPoolMinCount,
-    systemPoolMaxCount,
-    sshPubKey,
-    adminUserObjectId: adminUserObjectId,
-});
-
-// Get managed ingress controller IP
-// Note: If roleAssignment exists, Kubernetes provider should depend on it
-const { provider: k8sProvider, ip: ingressIP } = getIngressController({
-    kubeconfig: clusterKubeconfig,
-    environment,
-    dependsOn: roleAssignment ? [roleAssignment] : [],
-});
-
 // Create DNS zone
 const { zone: dnsZone, nameServers: dnsNameServers, resourceGroup: dnsResourceGroup } = createDnsZone({
     environment,
@@ -67,23 +54,56 @@ const { zone: dnsZone, nameServers: dnsNameServers, resourceGroup: dnsResourceGr
     location,
 });
 
-// Create DNS A record for root domain pointing to ingress IP
-const rootARecord = createDnsARecord(
-    dnsZone.name,
-    dnsResourceGroup.name,
-    "@",
-    ingressIP,
-    environment
-);
+// Cluster and everything that runs in it; skipped entirely while paused
+function deployCluster() {
+    // Create AKS Automatic cluster
+    const { kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn, roleAssignment } = createAksCluster({
+        resourceGroupName: resourceGroup.name,
+        environment,
+        kubernetesVersion,
+        systemPoolVmSize,
+        systemPoolMinCount,
+        systemPoolMaxCount,
+        sshPubKey,
+        adminUserObjectId: adminUserObjectId,
+    });
 
-// Create wildcard A record for subdomains
-const wildcardARecord = createDnsARecord(
-    dnsZone.name,
-    dnsResourceGroup.name,
-    "*",
-    ingressIP,
-    environment
-);
+    // Get managed ingress controller IP
+    // Note: If roleAssignment exists, Kubernetes provider should depend on it
+    const { provider: k8sProvider, ip: ingressIP } = getIngressController({
+        kubeconfig: clusterKubeconfig,
+        environment,
+        dependsOn: roleAssignment ? [roleAssignment] : [],
+    });
+
+    // Create DNS A record for root domain pointing to ingress IP
+    createDnsARecord(dnsZone.name, dnsResourceGroup.name, "@", ingressIP, environment);
+
+    // Create wildcard A record for subdomains
+    createDnsARecord(dnsZone.name, dnsResourceGroup.name, "*", ingressIP, environment);
+
+    // Install cert-manager with Let's Encrypt
+    installCertManager({
+        provider: k8sProvider,
+        environment,
+        email: certEmail,
+    });
+
+    // Patch AKS-managed Karpenter NodePools for cost optimization:
+    //  - default: enable spot instances alongside on-demand
+    //  - system-surge: switch amd64 → arm64
+    patchKarpenterNodePools({
+        provider: k8sProvider,
+        environment,
+    });
+
+    return { clusterKubeconfig, clusterName, clusterOidcIssuerUrl, fqdn, ingressIP };
+}
+
+const clusterResources = paused ? undefined : deployCluster();
+if (paused) {
+    pulumi.log.warn(`⏸️  ${environment} is paused: AKS cluster is not deployed (ACR and DNS zone are kept)`);
+}
 
 // For prod environment, create DNS delegation for dev subdomain
 let devDelegation: azurenative.network.RecordSet | undefined;
@@ -134,34 +154,21 @@ if (environment === "prod") {
     }
 }
 
-// Install cert-manager with Let's Encrypt
-const { release: certManagerRelease, clusterIssuerProd, clusterIssuerStaging } = installCertManager({
-    provider: k8sProvider,
-    environment,
-    email: certEmail,
-});
-
-// Patch AKS-managed Karpenter NodePools for cost optimization:
-//  - default: enable spot instances alongside on-demand
-//  - system-surge: switch amd64 → arm64
-const karpenterPatches = patchKarpenterNodePools({
-    provider: k8sProvider,
-    environment,
-});
-
-// Export stack outputs
+// Export stack outputs (cluster outputs are absent while paused)
 export const outputs = {
+    paused: paused,
+
     // Cluster information
     resourceGroupName: resourceGroup.name,
-    clusterName: clusterName,
-    clusterFqdn: fqdn,
-    kubeconfig: pulumi.secret(clusterKubeconfig),
+    clusterName: clusterResources?.clusterName,
+    clusterFqdn: clusterResources?.fqdn,
+    kubeconfig: clusterResources ? pulumi.secret(clusterResources.clusterKubeconfig) : undefined,
 
     // OIDC for workload identity
-    oidcIssuerUrl: clusterOidcIssuerUrl,
+    oidcIssuerUrl: clusterResources?.clusterOidcIssuerUrl,
 
     // Ingress
-    ingressControllerIP: ingressIP,
+    ingressControllerIP: clusterResources?.ingressIP,
 
     // DNS
     domain: domain,
@@ -183,6 +190,7 @@ export const outputs = {
 };
 
 // Export individual outputs for easier access
+export const isPaused = outputs.paused;
 export const resourceGroupName = outputs.resourceGroupName;
 export const aksClusterName = outputs.clusterName;
 export const aksClusterFqdn = outputs.clusterFqdn;
