@@ -30,6 +30,25 @@ if (paused && environment === "prod") {
     throw new Error("paused=true is not allowed for prod");
 }
 
+// Flipping `paused` deletes or recreates the whole cluster, so only scripts/env.sh (which sets
+// ALLOW_PAUSE_CHANGE=1) may do it. A plain `pulumi up` or CI run whose committed Pulumi.<env>.yaml
+// disagrees with what is deployed fails here instead. The cluster's inputs wait on this check,
+// so nothing is created first, and a failed program never reaches the delete phase.
+const selfStack = new pulumi.StackReference(
+    `${pulumi.getOrganization()}/${pulumi.getProject()}/${pulumi.getStack()}`,
+);
+const pauseGuard = selfStack.getOutput("isPaused").apply(deployed => {
+    const deployedPaused = deployed === true;
+    if (deployedPaused !== paused && process.env.ALLOW_PAUSE_CHANGE !== "1") {
+        throw new Error(
+            `${environment} is deployed with paused=${deployedPaused} but config says paused=${paused}. ` +
+            `Use scripts/env.sh ${paused ? "pause" : "resume"} ${environment}, or commit ` +
+            `Pulumi.${environment}.yaml with paused: "${deployedPaused}".`,
+        );
+    }
+    return paused;
+});
+
 // Create main resource group for AKS
 const resourceGroup = new azurenative.resources.ResourceGroup(`${environment}-aks-rg`, {
     resourceGroupName: `${environment}-aks-rg`,
@@ -57,8 +76,8 @@ const { zone: dnsZone, nameServers: dnsNameServers, resourceGroup: dnsResourceGr
 // Cluster and everything that runs in it; skipped entirely while paused
 function deployCluster() {
     // Create AKS Automatic cluster
-    const { kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn, roleAssignment } = createAksCluster({
-        resourceGroupName: resourceGroup.name,
+    const { cluster, kubeconfig: clusterKubeconfig, clusterName, oidcIssuerUrl: clusterOidcIssuerUrl, fqdn, roleAssignment } = createAksCluster({
+        resourceGroupName: pulumi.all([pauseGuard, resourceGroup.name]).apply(([, rgName]) => rgName),
         environment,
         kubernetesVersion,
         systemPoolVmSize,
@@ -82,11 +101,16 @@ function deployCluster() {
     // Create wildcard A record for subdomains
     createDnsARecord(dnsZone.name, dnsResourceGroup.name, "*", ingressIP, environment);
 
+    // In-cluster resources below use deletedWith: cluster, so pausing deletes the cluster directly
+    // instead of first removing them one by one (deleting the AKS-managed NodePools would make
+    // Karpenter drain every node while finalizers and PDBs are still in place).
+
     // Install cert-manager with Let's Encrypt
     installCertManager({
         provider: k8sProvider,
         environment,
         email: certEmail,
+        deletedWith: cluster,
     });
 
     // Patch AKS-managed Karpenter NodePools for cost optimization:
@@ -95,6 +119,7 @@ function deployCluster() {
     patchKarpenterNodePools({
         provider: k8sProvider,
         environment,
+        deletedWith: cluster,
     });
 
     return { clusterKubeconfig, clusterName, clusterOidcIssuerUrl, fqdn, ingressIP };
@@ -105,52 +130,32 @@ if (paused) {
     pulumi.log.warn(`⏸️  ${environment} is paused: AKS cluster is not deployed (ACR and DNS zone are kept)`);
 }
 
-// For prod environment, create DNS delegation for dev subdomain
-let devDelegation: azurenative.network.RecordSet | undefined;
-let prodDelegation: azurenative.network.RecordSet | undefined;
+// For prod environment, delegate the dev and beta subdomains to their own DNS zones.
+// Each child zone must be <subdomain>.<prod domain> (e.g. beta.az.zeromoblt.com), otherwise the NS
+// records point at a zone with the wrong apex and nothing resolves. No try/catch: a broken
+// delegation should fail the deploy, not log a warning.
 if (environment === "prod") {
-    try {
-        // Reference the dev stack to get its DNS name servers
-        const devStack = new pulumi.StackReference("dev", {
-            name: `${pulumi.getOrganization()}/o-platform-infra-azure/dev`,
+    for (const subdomain of ["dev", "beta"]) {
+        const childStack = new pulumi.StackReference(subdomain, {
+            name: `${pulumi.getOrganization()}/o-platform-infra-azure/${subdomain}`,
         });
+        const expectedDomain = `${subdomain}.${domain}`;
+        const childNameServers = pulumi
+            .all([childStack.requireOutput("domainName"), childStack.requireOutput("nameServers")])
+            .apply(([childDomain, nameServers]) => {
+                if (childDomain !== expectedDomain) {
+                    throw new Error(`${subdomain} stack domain is ${childDomain}, expected ${expectedDomain}`);
+                }
+                return nameServers as string[];
+            });
 
-        const devNameServers = devStack.getOutput("nameServers");
-
-        // Create NS records to delegate dev.az.zeromoblt.com to dev's DNS zone
-        devDelegation = createDnsDelegation({
+        createDnsDelegation({
             parentZoneName: dnsZone.name,
             parentResourceGroupName: dnsResourceGroup.name,
-            subdomain: "dev", // Just "dev" because we're in az.zeromoblt.com zone
-            nameServers: devNameServers,
+            subdomain, // relative to the prod zone (az.zeromoblt.com)
+            nameServers: childNameServers,
             environment: environment,
         });
-
-        pulumi.log.info("✅ Created DNS delegation for dev.az subdomain");
-    } catch (error) {
-        pulumi.log.warn(`⚠️  Could not create DNS delegation for dev: ${error}`);
-    }
-
-    try {
-        // Reference the beta stack to get its DNS name servers
-        const betaStack = new pulumi.StackReference("beta", {
-            name: `${pulumi.getOrganization()}/o-platform-infra-azure/beta`,
-        });
-
-        const betaNameServers = betaStack.getOutput("nameServers");
-
-        // Create NS records to delegate beta.az.zeromoblt.com to beta's DNS zone
-        devDelegation = createDnsDelegation({
-            parentZoneName: dnsZone.name,
-            parentResourceGroupName: dnsResourceGroup.name,
-            subdomain: "beta", // Just "beta" because we're in az.zeromoblt.com zone
-            nameServers: betaNameServers,
-            environment: environment,
-        });
-
-        pulumi.log.info("✅ Created DNS delegation for beta.az subdomain");
-    } catch (error) {
-        pulumi.log.warn(`⚠️  Could not create DNS delegation for beta: ${error}`);
     }
 }
 

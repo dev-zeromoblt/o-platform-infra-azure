@@ -5,6 +5,8 @@ export interface CertManagerConfig {
     provider: k8s.Provider;
     environment: string;
     email: string;
+    // Skip deleting these in-cluster resources when the cluster itself is being deleted
+    deletedWith?: pulumi.Resource;
 }
 
 export function installCertManager(config: CertManagerConfig) {
@@ -20,7 +22,7 @@ export function installCertManager(config: CertManagerConfig) {
                 }
             }
         },
-        { provider: config.provider }
+        { provider: config.provider, deletedWith: config.deletedWith }
     );
 
     // Install cert-manager using Helm Release (not Chart - Release waits for deployment)
@@ -81,7 +83,8 @@ export function installCertManager(config: CertManagerConfig) {
         },
         {
             provider: config.provider,
-            dependsOn: [certManagerNamespace]
+            dependsOn: [certManagerNamespace],
+            deletedWith: config.deletedWith,
         }
     );
 
@@ -116,6 +119,7 @@ export function installCertManager(config: CertManagerConfig) {
         {
             provider: config.provider,
             dependsOn: [certManager],
+            deletedWith: config.deletedWith,
         }
     );
 
@@ -150,6 +154,7 @@ export function installCertManager(config: CertManagerConfig) {
         {
             provider: config.provider,
             dependsOn: [certManager],
+            deletedWith: config.deletedWith,
         }
     );
 

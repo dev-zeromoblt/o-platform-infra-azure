@@ -1,3 +1,4 @@
+import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
 
 /**
@@ -16,10 +17,13 @@ import * as k8s from "@pulumi/kubernetes";
 export interface KarpenterPatchConfig {
     provider: k8s.Provider;
     environment: string;
+    // Pass the cluster: these NodePools are AKS-managed, so deleting them on their own makes
+    // Karpenter drain every node. When the cluster goes away they go with it.
+    deletedWith?: pulumi.Resource;
 }
 
 export function patchKarpenterNodePools(config: KarpenterPatchConfig) {
-    const { provider, environment } = config;
+    const { provider, environment, deletedWith } = config;
 
     // --- 1. Patch "default" NodePool: enable spot instances ---
     // The AKS-managed default pool only allows on-demand. Adding spot lets
@@ -89,6 +93,7 @@ export function patchKarpenterNodePools(config: KarpenterPatchConfig) {
         },
         {
             provider,
+            deletedWith,
         },
     );
 
@@ -168,6 +173,7 @@ export function patchKarpenterNodePools(config: KarpenterPatchConfig) {
         },
         {
             provider,
+            deletedWith,
         },
     );
 

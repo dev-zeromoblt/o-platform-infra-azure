@@ -5,7 +5,7 @@ config:
   o-platform-infra-azure:systemPoolVmSize: Standard_D4pds_v5
   o-platform-infra-azure:systemPoolMinCount: "1"
   o-platform-infra-azure:systemPoolMaxCount: "3"
-  o-platform-infra-azure:domain: az.zeromoblt.com
+  o-platform-infra-azure:domain: beta.az.zeromoblt.com
   o-platform-infra-azure:certManagerEmail: admin@zeromoblt.com
   # Set SSH public key with: pulumi config set sshPubKey "$(cat ~/.ssh/id_rsa.pub)"
 

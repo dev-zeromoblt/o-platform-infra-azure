@@ -124,6 +124,7 @@ jobs:
     needs: preview-dev
     runs-on: ubuntu-latest
     outputs:
+      isPaused: ${{ steps.outputs.outputs.isPaused }}
       resourceGroupName: ${{ steps.outputs.outputs.resourceGroupName }}
       aksClusterName: ${{ steps.outputs.outputs.aksClusterName }}
       ingressControllerIP: ${{ steps.outputs.outputs.ingressControllerIP }}
@@ -158,6 +159,7 @@ jobs:
         id: outputs
         run: |
           pulumi stack select dev
+          echo "isPaused=$(pulumi stack output isPaused 2>/dev/null || echo false)" >> "$GITHUB_OUTPUT"
           echo "resourceGroupName=$(pulumi stack output resourceGroupName)" >> "$GITHUB_OUTPUT"
           echo "aksClusterName=$(pulumi stack output aksClusterName)" >> "$GITHUB_OUTPUT"
           echo "ingressControllerIP=$(pulumi stack output ingressControllerIP)" >> "$GITHUB_OUTPUT"
@@ -174,6 +176,8 @@ jobs:
   test-dev:
     name: Integration Tests (Dev)
     needs: dev-outputs
+    # Dev paused via scripts/env.sh: there is no cluster to test against
+    if: needs.dev-outputs.outputs.isPaused != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
